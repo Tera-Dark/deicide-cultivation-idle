@@ -18,15 +18,17 @@ import { PhaseBreakSigilIcon } from './CultivationIcons';
 function CompanionGeometry({
   archetype,
   pulseId,
+  hitVfxEnabled,
 }: {
   archetype: ArchetypeId;
   pulseId: number;
+  hitVfxEnabled: boolean;
 }) {
   return (
     <div
-      key={`merc-${pulseId}`}
+      key={hitVfxEnabled ? `merc-${pulseId}` : 'merc-static'}
       className={`w-6 h-6 flex items-center justify-center ${
-        pulseId > 0 ? 'animate-companion-lunge' : ''
+        hitVfxEnabled && pulseId > 0 ? 'animate-companion-lunge' : ''
       }`}
       title={ARCHETYPES[archetype].name}
     >
@@ -354,7 +356,7 @@ export function BossArena() {
   return (
     <section
       className={`h-[43%] min-h-[265px] shrink-0 relative flex flex-col border-b border-[#2e3552] bg-[#101322] ${
-        isArenaShaking ? 'animate-arena-shake' : ''
+        settings.hitVfxEnabled && isArenaShaking ? 'animate-arena-shake' : ''
       }`}
     >
       {/* Top Info: Shell Name, Dual-Layer HP Bar, 10 Phase Nodes */}
@@ -441,31 +443,36 @@ export function BossArena() {
           </div>
         )}
 
-        {shellShatterId > 0 && (
+        {settings.hitVfxEnabled && shellShatterId > 0 && (
           <div
             key={`shock-${shellShatterId}`}
             className="pointer-events-none absolute w-40 h-40 rounded-full border-2 border-[#f43f5e] animate-shell-shatter"
           />
         )}
 
-        {clickRipples.map((r) => (
-          <div
-            key={r.id}
-            className="pointer-events-none absolute w-12 h-12 rounded-full border-2 border-[#22d3ee] animate-click-ripple"
-            style={{ left: `${r.x}%`, top: `${r.y}%` }}
-          />
-        ))}
+        {settings.hitVfxEnabled &&
+          clickRipples.map((r) => (
+            <div
+              key={r.id}
+              className="pointer-events-none absolute w-12 h-12 rounded-full border-2 border-[#22d3ee] animate-click-ripple"
+              style={{ left: `${r.x}%`, top: `${r.y}%` }}
+            />
+          ))}
 
         <div
           className="relative flex items-center justify-center transition-[transform,filter] duration-75"
           style={{
-            transform: `translate3d(${hitOffset.x}px, ${hitOffset.y}px, 0) scale(${
-              isHitSquashed ? 0.92 : 1
-            })`,
-            filter: isHitSquashed ? 'brightness(1.7)' : 'brightness(1)',
+            transform:
+              settings.hitVfxEnabled && isHitSquashed
+                ? `translate3d(${hitOffset.x}px, ${hitOffset.y}px, 0) scale(0.92)`
+                : 'translate3d(0, 0, 0) scale(1)',
+            filter: settings.hitVfxEnabled && isHitSquashed ? 'brightness(1.7)' : 'brightness(1)',
           }}
         >
-          <BossSacredGeometry phaseIndex={run.phaseIndex} isHitSquashed={isHitSquashed} />
+          <BossSacredGeometry
+            phaseIndex={run.phaseIndex}
+            isHitSquashed={settings.hitVfxEnabled && isHitSquashed}
+          />
         </div>
 
         {unlockedMercs.length > 0 && (
@@ -476,35 +483,44 @@ export function BossArena() {
                   key={idx}
                   archetype={m.archetype}
                   pulseId={mercPulseIds[idx]}
+                  hitVfxEnabled={settings.hitVfxEnabled}
                 />
               ) : null
             )}
           </div>
         )}
 
-        <div className="pointer-events-none absolute inset-0 overflow-hidden z-20">
-          {floatingTexts.map((ft) => {
-            const cls =
-              ft.kind === 'crit'
-                ? 'text-[#fbbf24] text-sm font-extrabold animate-float-crit'
-                : ft.kind === 'poison'
-                  ? 'text-[#34d399] text-xs font-semibold animate-float-dmg'
-                  : ft.kind === 'thunder'
-                    ? 'text-[#c084fc] text-sm font-bold animate-float-crit'
-                    : ft.kind === 'shell'
-                      ? 'text-[#fde68a] text-sm font-bold animate-float-crit'
-                      : 'text-[#f8fafc] text-xs font-medium animate-float-dmg';
-            return (
-              <div
-                key={ft.id}
-                className={`absolute font-mono-num whitespace-nowrap drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)] ${cls}`}
-                style={{ left: `${ft.x}%`, top: `${ft.y}%` }}
-              >
-                {ft.text}
-              </div>
-            );
-          })}
-        </div>
+        {settings.floatingTextMode !== 'off' && (
+          <div className="pointer-events-none absolute inset-0 overflow-hidden z-20">
+            {floatingTexts
+              .filter((ft) =>
+                settings.floatingTextMode === 'crit'
+                  ? ft.kind === 'crit' || ft.kind === 'thunder' || ft.kind === 'shell'
+                  : true
+              )
+              .map((ft) => {
+                const cls =
+                  ft.kind === 'crit'
+                    ? 'text-[#fbbf24] text-sm font-extrabold animate-float-crit'
+                    : ft.kind === 'poison'
+                      ? 'text-[#34d399] text-xs font-semibold animate-float-dmg'
+                      : ft.kind === 'thunder'
+                        ? 'text-[#c084fc] text-sm font-bold animate-float-crit'
+                        : ft.kind === 'shell'
+                          ? 'text-[#fde68a] text-sm font-bold animate-float-crit'
+                          : 'text-[#f8fafc] text-xs font-medium animate-float-dmg';
+                return (
+                  <div
+                    key={ft.id}
+                    className={`absolute font-mono-num whitespace-nowrap drop-shadow-[0_2px_4px_rgba(0,0,0,0.95)] ${cls}`}
+                    style={{ left: `${ft.x}%`, top: `${ft.y}%` }}
+                  >
+                    {ft.text}
+                  </div>
+                );
+              })}
+          </div>
+        )}
       </div>
 
       {/* Bottom Skill Quick-Cast Bar */}

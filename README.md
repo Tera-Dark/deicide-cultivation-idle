@@ -110,6 +110,18 @@ npm run preview
 
 ---
 
+## GitHub Pages 在线游玩部署
+
+仓库已内置 [`.github/workflows/deploy.yml`](./.github/workflows/deploy.yml) 与自适应 `base` 路径配置（[`vite.config.ts`](./vite.config.ts)），推送至 GitHub 即可零配置自动发布并直接在电脑或手机浏览器中在线游玩（本地 `localStorage` 自动存档，支持 Base64 导出迁移）：
+
+1. 将本仓库代码推送到 GitHub 的 `main` 或 `master` 分支。
+2. 进入 GitHub 仓库页 **Settings → Pages**。
+3. 在 **Build and deployment → Source** 下拉框中选择 **GitHub Actions**。
+4. 等待 Actions 中的 **Deploy to GitHub Pages** 工作流运行完成（约 1 分钟），即可通过页面生成的 `https://<你的用户名>.github.io/<仓库名>/` 链接直接游玩。
+5. 若使用自定义根域名或手动上传静态产物，亦可通过 `VITE_BASE_PATH=/ npm run build` 自定义基础路径。
+
+---
+
 ## 设计文档索引
 
 完整数值平衡、公式推导、词缀/遗物配置表均归档于 [`docs/`](./docs/00_PROJECT_MAP.md) 目录：

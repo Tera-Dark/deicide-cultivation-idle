@@ -1,5 +1,6 @@
 export type NumberDisplayMode = 'chinese' | 'scientific';
 export type BuyMode = 1 | 10 | 'MAX';
+export type FloatingTextMode = 'all' | 'crit' | 'off';
 
 export type ArchetypeId =
   | 'merc_sword'
@@ -205,12 +206,19 @@ export interface MetaState {
   autoRepeatEnabled: boolean;
   totalSlays: number;
   totalRestarts: number;
+  totalPlayTimeMs: number;
+  totalClicks: string;
+  highestDps: string;
+  totalRerolls: number;
 }
 
 export interface SettingsState {
   numberMode: NumberDisplayMode;
   soundEnabled: boolean;
   buyMode: BuyMode;
+  floatingTextMode: FloatingTextMode;
+  hitVfxEnabled: boolean;
+  vibrationEnabled: boolean;
 }
 
 export interface GameSaveData {

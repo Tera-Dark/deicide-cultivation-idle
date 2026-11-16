@@ -47,6 +47,7 @@ import type {
   BuyMode,
   ClickRipple,
   FloatingDamageText,
+  FloatingTextMode,
   GameSaveData,
   InnateAffixId,
   MercenarySlotState,
@@ -129,6 +130,10 @@ export function createInitialMetaState(): MetaState {
     autoRepeatEnabled: false,
     totalSlays: 0,
     totalRestarts: 0,
+    totalPlayTimeMs: 0,
+    totalClicks: '0',
+    highestDps: '0',
+    totalRerolls: 0,
   };
 }
 
@@ -253,6 +258,9 @@ function loadSavedState(): {
     numberMode: 'chinese',
     soundEnabled: true,
     buyMode: 1,
+    floatingTextMode: 'all',
+    hitVfxEnabled: true,
+    vibrationEnabled: true,
   };
 
   try {
@@ -269,6 +277,10 @@ function loadSavedState(): {
     const meta: MetaState = {
       ...defaultMeta,
       ...(parsed.meta ?? {}),
+      totalPlayTimeMs: Number(parsed.meta?.totalPlayTimeMs ?? 0) || 0,
+      totalClicks: parsed.meta?.totalClicks ?? '0',
+      highestDps: parsed.meta?.highestDps ?? '0',
+      totalRerolls: Number(parsed.meta?.totalRerolls ?? 0) || 0,
       shownTutorials: {
         ...defaultMeta.shownTutorials,
         ...(parsed.meta?.shownTutorials ?? {}),
@@ -295,9 +307,22 @@ function loadSavedState(): {
           }))
         : defaultMercs;
 
+    const rawFloatMode = parsed.settings?.floatingTextMode;
     const settings: SettingsState = {
       ...defaultSettings,
       ...(parsed.settings ?? {}),
+      floatingTextMode:
+        rawFloatMode === 'all' || rawFloatMode === 'crit' || rawFloatMode === 'off'
+          ? rawFloatMode
+          : 'all',
+      hitVfxEnabled:
+        typeof parsed.settings?.hitVfxEnabled === 'boolean'
+          ? parsed.settings.hitVfxEnabled
+          : true,
+      vibrationEnabled:
+        typeof parsed.settings?.vibrationEnabled === 'boolean'
+          ? parsed.settings.vibrationEnabled
+          : true,
     };
 
     const baseRun = createInitialRunState(parsed.run?.tribulationId ?? 'tier_1', meta);
@@ -410,9 +435,14 @@ interface GameContextValue {
   setBuyMode: (mode: BuyMode) => void;
   setNumberMode: (mode: NumberDisplayMode) => void;
   setSoundEnabled: (enabled: boolean) => void;
+  setFloatingTextMode: (mode: FloatingTextMode) => void;
+  setHitVfxEnabled: (enabled: boolean) => void;
+  setVibrationEnabled: (enabled: boolean) => void;
+  lastSavedAt: number;
+  saveNow: () => void;
   exportSaveString: () => string;
   importSaveString: (b64: string) => { ok: boolean; error?: string };
-  hardResetAll: () => void;
+  hardResetAll: (reloadAfter?: boolean) => void;
 }
 
 const GameContext = createContext<GameContextValue | null>(null);
@@ -443,6 +473,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [autoRepeatCountdown, setAutoRepeatCountdown] = useState<number | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [activeTutorial, setActiveTutorial] = useState<TutorialNodeId | null>(null);
+  const [lastSavedAt, setLastSavedAt] = useState<number>(() => Date.now());
 
   const runRef = useRef(run);
   runRef.current = run;
@@ -462,6 +493,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const squashTimerRef = useRef<number | null>(null);
   const shakeTimerRef = useRef<number | null>(null);
   const toastTimerRef = useRef<number | null>(null);
+  const lastMetaUiSyncRef = useRef<number>(Date.now());
+  const isHardResettingRef = useRef(false);
 
   useEffect(() => {
     soundEngine.setEnabled(settings.soundEnabled);
@@ -473,6 +506,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     toastTimerRef.current = window.setTimeout(() => setToastMessage(null), 3200);
   }, []);
 
+  const triggerVibration = useCallback((pattern: number | number[]) => {
+    if (!settingsRef.current.vibrationEnabled) return;
+    try {
+      if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') {
+        navigator.vibrate(pattern);
+      }
+    } catch {
+      // Ignore vibration errors on unsupported devices
+    }
+  }, []);
+
   const queueTutorial = useCallback((id: TutorialNodeId, targetMeta: MetaState) => {
     if (!targetMeta.shownTutorials[id]) {
       targetMeta.shownTutorials = { ...targetMeta.shownTutorials, [id]: true };
@@ -481,6 +525,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const triggerHitSquash = useCallback(() => {
+    if (!settingsRef.current.hitVfxEnabled) return;
     setIsHitSquashed(true);
     setHitOffset({
       x: Math.round((Math.random() - 0.5) * 6),
@@ -494,12 +539,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const triggerArenaShake = useCallback(() => {
+    if (!settingsRef.current.hitVfxEnabled) return;
     setIsArenaShaking(true);
     if (shakeTimerRef.current) window.clearTimeout(shakeTimerRef.current);
     shakeTimerRef.current = window.setTimeout(() => setIsArenaShaking(false), 260);
   }, []);
 
   const spawnClickRipple = useCallback((xPct: number, yPct: number) => {
+    if (!settingsRef.current.hitVfxEnabled) return;
     const id = rippleIdRef.current++;
     setClickRipples((prev) => {
       const next = prev.length >= 10 ? prev.slice(prev.length - 9) : prev;
@@ -512,6 +559,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   const spawnFloatingText = useCallback(
     (text: string, kind: FloatingDamageText['kind'], xPct?: number, yPct?: number) => {
+      const mode = settingsRef.current.floatingTextMode;
+      if (mode === 'off') return;
+      if (mode === 'crit' && kind !== 'crit' && kind !== 'thunder' && kind !== 'shell') {
+        return;
+      }
       const id = floatIdRef.current++;
       const x = xPct ?? 30 + Math.random() * 40;
       const y = yPct ?? 24 + Math.random() * 34;
@@ -527,20 +579,28 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   );
 
   const saveToLocalStorage = useCallback(() => {
+    if (isHardResettingRef.current) return;
     try {
+      const savedAt = Date.now();
       const payload: GameSaveData = {
         version: 35,
-        savedAt: Date.now(),
+        savedAt,
         run: runRef.current,
         mercs: mercsRef.current,
         meta: metaRef.current,
         settings: settingsRef.current,
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      setLastSavedAt(savedAt);
     } catch {
       // Ignore storage quota errors
     }
   }, []);
+
+  const saveNow = useCallback(() => {
+    saveToLocalStorage();
+    showToast('已立即保存当前全部修为与设置');
+  }, [saveToLocalStorage, showToast]);
 
   const applyBossDamageAndCheckBreaks = useCallback(
     (
@@ -723,6 +783,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const thunderDmg = unpenalizedHero.mul(eff.effectValue);
       const res = applyBossDamageAndCheckBreaks(nextRun, nextMercs, nextMeta, thunderDmg);
       soundEngine.playCannonFire();
+      triggerVibration(35);
       spawnFloatingText(
         `天罚神雷 -${formatNumber(res.actualDealt, settingsRef.current.numberMode)}`,
         'thunder',
@@ -731,7 +792,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       );
       return res;
     },
-    [applyBossDamageAndCheckBreaks, spawnFloatingText]
+    [applyBossDamageAndCheckBreaks, spawnFloatingText, triggerVibration]
   );
 
   const handleVictory = useCallback(
@@ -1119,6 +1180,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const newStacks = oldStacks.add(clickCount);
       nextRun.clickStacks = newStacks.toString();
       if (clickSource === 'manual') nextRun.manualClicks += clickCount;
+      nextMeta.totalClicks = toDecimal(nextMeta.totalClicks).add(clickCount).toString();
 
       // Hero attack growth with Puppet 25% sourceFactor + 500-click soft cap 20% + Skill 1
       const growthPerClick = getHeroGrowthPerClick(nextRun, nextMercs, nextMeta);
@@ -1498,30 +1560,45 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         latestGlobal
       ).expectedPoison;
 
+      const mercDpsStrings = nextMercs.map((m, idx) =>
+        m.unlocked && m.level > 0
+          ? getMercenaryComputedStats(
+              idx,
+              nextMercs,
+              nextRun,
+              nextMeta,
+              latestStats.heroBasePower,
+              latestStats.rawHeroClick,
+              latestGlobal
+            ).dpsEstimate.toString()
+          : '0'
+      ) as [string, string, string, string, string];
+
       nextRun.recentTickDps = {
         hero: heroEstDps.toString(),
         poison: poisonEstDps.toString(),
-        mercs: nextMercs.map((m, idx) =>
-          m.unlocked && m.level > 0
-            ? getMercenaryComputedStats(
-                idx,
-                nextMercs,
-                nextRun,
-                nextMeta,
-                latestStats.heroBasePower,
-                latestStats.rawHeroClick,
-                latestGlobal
-              ).dpsEstimate.toString()
-            : '0'
-        ) as [string, string, string, string, string],
+        mercs: mercDpsStrings,
       };
+
+      // Update lifetime playtime & highest DPS
+      nextMeta.totalPlayTimeMs += dt * 1000;
+      const totalDpsNow = mercDpsStrings.reduce(
+        (acc, v) => acc.add(toDecimal(v)),
+        heroEstDps.add(poisonEstDps)
+      );
+      if (totalDpsNow.gt(toDecimal(nextMeta.highestDps))) {
+        nextMeta.highestDps = totalDpsNow.toString();
+      }
 
       const prevBrokenPhase = prevRun.phaseIndex;
       const shellBroke = nextRun.phaseIndex > prevBrokenPhase || nextRun.runCompleted;
       if (shellBroke) {
         soundEngine.playShellBreak();
-        setShellShatterId((x) => x + 1);
-        triggerArenaShake();
+        triggerVibration([35, 25, 45]);
+        if (settingsRef.current.hitVfxEnabled) {
+          setShellShatterId((x) => x + 1);
+          triggerArenaShake();
+        }
       }
 
       runRef.current = nextRun;
@@ -1532,8 +1609,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         mercsRef.current = nextMercs;
         setMercs(nextMercs);
       }
-      if (shellBroke || nextMeta.affixStones !== metaRef.current.affixStones) {
-        metaRef.current = nextMeta;
+
+      const stonesChanged = nextMeta.affixStones !== metaRef.current.affixStones;
+      const shouldSyncMetaUi =
+        shellBroke || stonesChanged || nowMs - lastMetaUiSyncRef.current >= 1000;
+
+      metaRef.current = nextMeta;
+      if (shouldSyncMetaUi) {
+        lastMetaUiSyncRef.current = nowMs;
         setMeta(nextMeta);
       }
 
@@ -1551,6 +1634,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     handleVictory,
     spawnFloatingText,
     triggerArenaShake,
+    triggerVibration,
   ]);
 
   // Auto-save every 2s
@@ -1605,8 +1689,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const res = applyHeroClicks(nextRun, nextMercs, nextMeta, 1, 'manual', xPct, yPct);
       if (res.shellsBroken > 0) {
         soundEngine.playShellBreak();
-        setShellShatterId((x) => x + 1);
-        triggerArenaShake();
+        triggerVibration([35, 25, 45]);
+        if (settingsRef.current.hitVfxEnabled) {
+          setShellShatterId((x) => x + 1);
+          triggerArenaShake();
+        }
       }
 
       runRef.current = nextRun;
@@ -1620,7 +1707,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         handleVictory(nextRun, nextMeta);
       }
     },
-    [applyHeroClicks, handleVictory, triggerArenaShake]
+    [applyHeroClicks, handleVictory, triggerArenaShake, triggerVibration]
   );
 
   const upgradeEnlightenment = useCallback(() => {
@@ -2012,15 +2099,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       const luckLv = curMeta.relicLevels.rel_e_affix_luck ?? 0;
       const candidates = [...slot.levelAffixes];
-      candidates[affixIdx] = {
+      const rolledAffix: AffixInstance = {
         id: rollRandomAffixId(),
         tier: rollAffixTier(luckLv, triggeredPity),
       };
+      candidates[affixIdx] = rolledAffix;
 
       const nextMeta: MetaState = {
         ...curMeta,
         affixStones: isFreeRoll ? curMeta.affixStones : curMeta.affixStones - stoneCost,
         rerollPity: nextPity,
+        totalRerolls: curMeta.totalRerolls + 1,
       };
       const nextMercs = mercsRef.current.map((m, idx) =>
         idx === slotIndex
@@ -2040,13 +2129,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       setMercs(nextMercs);
       saveToLocalStorage();
 
+      if (rolledAffix.tier === 'purple' || rolledAffix.tier === 'gold') {
+        triggerVibration([25, 20, 35]);
+      }
+
       if (triggeredPity) {
         showToast('气运爆发！10次保底必出极品/仙品词缀！请确认替换');
       } else if (isFreeRoll) {
         showToast('触发【命运骰子】免单洗练！请确认替换');
       }
     },
-    [saveToLocalStorage, showToast]
+    [saveToLocalStorage, showToast, triggerVibration]
   );
 
   const rerollMercBatchSlots = useCallback(
@@ -2090,10 +2183,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         ? targetIndices[Math.floor(Math.random() * targetIndices.length)]
         : -1;
 
+      let rolledHighTier = false;
       for (const idx of targetIndices) {
+        const tier = rollAffixTier(luckLv, idx === pityPickIdx);
+        if (tier === 'purple' || tier === 'gold') rolledHighTier = true;
         candidates[idx] = {
           id: rollRandomAffixId(),
-          tier: rollAffixTier(luckLv, idx === pityPickIdx),
+          tier,
         };
       }
 
@@ -2101,6 +2197,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         ...curMeta,
         affixStones: isFreeRoll ? curMeta.affixStones : curMeta.affixStones - stoneCost,
         rerollPity: nextPity,
+        totalRerolls: curMeta.totalRerolls + 1,
       };
       const nextMercs = mercsRef.current.map((m, idx) =>
         idx === slotIndex
@@ -2120,13 +2217,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       setMercs(nextMercs);
       saveToLocalStorage();
 
+      if (rolledHighTier) {
+        triggerVibration([25, 20, 35]);
+      }
+
       if (triggeredPity) {
         showToast('气运爆发！10次保底必出极品/仙品词缀！请确认替换');
       } else if (isFreeRoll) {
         showToast('触发【命运骰子】免单洗练！请确认替换');
       }
     },
-    [saveToLocalStorage, showToast]
+    [saveToLocalStorage, showToast, triggerVibration]
   );
 
   const confirmPendingLevelAffixes = useCallback(
@@ -2178,6 +2279,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         divineCrystals: isFreeRoll
           ? curMeta.divineCrystals
           : curCrystals.sub(crystalCost).toString(),
+        totalRerolls: curMeta.totalRerolls + 1,
       };
       const nextMercs = mercsRef.current.map((m, idx) =>
         idx === slotIndex ? { ...m, pendingInnateAffix: newInnate } : m
@@ -2374,22 +2476,96 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     });
   }, []);
 
-  const setBuyMode = useCallback((buyMode: BuyMode) => {
-    setSettings((prev) => ({ ...prev, buyMode }));
-  }, []);
+  const setBuyMode = useCallback(
+    (buyMode: BuyMode) => {
+      setSettings((prev) => {
+        const next = { ...prev, buyMode };
+        settingsRef.current = next;
+        return next;
+      });
+      saveToLocalStorage();
+    },
+    [saveToLocalStorage]
+  );
 
-  const setNumberMode = useCallback((numberMode: NumberDisplayMode) => {
-    setSettings((prev) => ({ ...prev, numberMode }));
-  }, []);
+  const setNumberMode = useCallback(
+    (numberMode: NumberDisplayMode) => {
+      setSettings((prev) => {
+        const next = { ...prev, numberMode };
+        settingsRef.current = next;
+        return next;
+      });
+      saveToLocalStorage();
+    },
+    [saveToLocalStorage]
+  );
 
-  const setSoundEnabled = useCallback((soundEnabled: boolean) => {
-    setSettings((prev) => ({ ...prev, soundEnabled }));
-  }, []);
+  const setSoundEnabled = useCallback(
+    (soundEnabled: boolean) => {
+      setSettings((prev) => {
+        const next = { ...prev, soundEnabled };
+        settingsRef.current = next;
+        return next;
+      });
+      saveToLocalStorage();
+    },
+    [saveToLocalStorage]
+  );
+
+  const setFloatingTextMode = useCallback(
+    (floatingTextMode: FloatingTextMode) => {
+      setSettings((prev) => {
+        const next = { ...prev, floatingTextMode };
+        settingsRef.current = next;
+        return next;
+      });
+      if (floatingTextMode === 'off') {
+        setFloatingTexts([]);
+      } else if (floatingTextMode === 'crit') {
+        setFloatingTexts((prev) =>
+          prev.filter((ft) => ft.kind === 'crit' || ft.kind === 'thunder' || ft.kind === 'shell')
+        );
+      }
+      saveToLocalStorage();
+    },
+    [saveToLocalStorage]
+  );
+
+  const setHitVfxEnabled = useCallback(
+    (hitVfxEnabled: boolean) => {
+      setSettings((prev) => {
+        const next = { ...prev, hitVfxEnabled };
+        settingsRef.current = next;
+        return next;
+      });
+      if (!hitVfxEnabled) {
+        setIsHitSquashed(false);
+        setIsArenaShaking(false);
+        setClickRipples([]);
+        setHitOffset({ x: 0, y: 0 });
+      }
+      saveToLocalStorage();
+    },
+    [saveToLocalStorage]
+  );
+
+  const setVibrationEnabled = useCallback(
+    (vibrationEnabled: boolean) => {
+      setSettings((prev) => {
+        const next = { ...prev, vibrationEnabled };
+        settingsRef.current = next;
+        return next;
+      });
+      saveToLocalStorage();
+    },
+    [saveToLocalStorage]
+  );
 
   const exportSaveString = useCallback(() => {
+    const savedAt = Date.now();
     const payload: GameSaveData = {
       version: 35,
-      savedAt: Date.now(),
+      savedAt,
       run: runRef.current,
       mercs: mercsRef.current,
       meta: metaRef.current,
@@ -2400,93 +2576,203 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   const importSaveString = useCallback(
     (b64: string): { ok: boolean; error?: string } => {
-      try {
-        const jsonStr = decodeBase64Utf8(b64);
-        const parsed = JSON.parse(jsonStr) as GameSaveData;
-        if (!parsed || !parsed.run || !parsed.meta || !Array.isArray(parsed.mercs)) {
-          return { ok: false, error: '存档格式不正确' };
-        }
-        const defMeta = createInitialMetaState();
-        const defMercs = createInitialMercsState();
-        const nextMeta: MetaState = {
-          ...defMeta,
-          ...parsed.meta,
-          shownTutorials: { ...defMeta.shownTutorials, ...(parsed.meta.shownTutorials ?? {}) },
-          relicLevels: { ...defMeta.relicLevels, ...(parsed.meta.relicLevels ?? {}) },
-          clearedTribulations: {
-            ...defMeta.clearedTribulations,
-            ...(parsed.meta.clearedTribulations ?? {}),
-          },
-        };
-        const nextMercs = parsed.mercs.map((m, i) => ({
-          ...defMercs[i],
-          ...m,
-          slotIndex: i,
-          archetype: FIXED_SLOT_ARCHETYPES[i],
-          levelAffixes: normalizeTenSlots<AffixInstance | null>(m.levelAffixes, null),
-          lockedLevelSlots: normalizeTenSlots<boolean>(m.lockedLevelSlots, false),
-        }));
-        const baseRun = createInitialRunState(parsed.run.tribulationId ?? 'tier_1', nextMeta);
-        const nextRun: RunState = {
-          ...baseRun,
-          ...parsed.run,
-          skills: { ...baseRun.skills, ...(parsed.run.skills ?? {}) },
-        };
-        const nextSettings: SettingsState = {
-          numberMode: parsed.settings?.numberMode ?? 'chinese',
-          soundEnabled: parsed.settings?.soundEnabled ?? true,
-          buyMode: parsed.settings?.buyMode ?? 1,
-        };
-
-        metaRef.current = nextMeta;
-        mercsRef.current = nextMercs;
-        runRef.current = nextRun;
-        settingsRef.current = nextSettings;
-        setMeta(nextMeta);
-        setMercs(nextMercs);
-        setRun(nextRun);
-        setSettings(nextSettings);
-        setVictorySummary(null);
-        setAutoRepeatCountdown(null);
-        localStorage.setItem(
-          STORAGE_KEY,
-          JSON.stringify({
-            version: 35,
-            savedAt: Date.now(),
-            run: nextRun,
-            mercs: nextMercs,
-            meta: nextMeta,
-            settings: nextSettings,
-          })
-        );
-        showToast('存档导入成功！');
-        return { ok: true };
-      } catch {
-        return { ok: false, error: '无效的 Base64 存档字符串' };
+      const cleaned = b64.replace(/\s+/g, '');
+      if (!cleaned) {
+        return { ok: false, error: '请输入 Base64 存档字符串' };
       }
+
+      let jsonStr: string;
+      try {
+        jsonStr = decodeBase64Utf8(cleaned);
+      } catch {
+        return { ok: false, error: '存档格式无效：Base64 解码失败，请检查是否完整复制' };
+      }
+
+      let parsed: GameSaveData;
+      try {
+        parsed = JSON.parse(jsonStr) as GameSaveData;
+      } catch {
+        return { ok: false, error: '存档结构损坏：无法解析 JSON 数据' };
+      }
+
+      if (
+        !parsed ||
+        typeof parsed !== 'object' ||
+        typeof parsed.version !== 'number' ||
+        !parsed.run ||
+        typeof parsed.run !== 'object' ||
+        !parsed.meta ||
+        typeof parsed.meta !== 'object' ||
+        !Array.isArray(parsed.mercs) ||
+        parsed.mercs.length !== 5
+      ) {
+        return { ok: false, error: '存档结构损坏：缺少版本号、局内进度或五人护法数据' };
+      }
+
+      const tribValid = TRIBULATIONS.some((t) => t.id === parsed.run.tribulationId);
+      if (!tribValid) {
+        return { ok: false, error: '存档校验失败：无效的劫数标识' };
+      }
+
+      const isValidDecimalField = (v: unknown) => {
+        if (v === undefined || v === null) return false;
+        try {
+          const d = new Decimal(v as string | number);
+          return Number.isFinite(d.mantissa) && !Number.isNaN(d.mantissa);
+        } catch {
+          return false;
+        }
+      };
+
+      if (
+        !isValidDecimalField(parsed.run.spiritStones) ||
+        !isValidDecimalField(parsed.run.bossHp) ||
+        !isValidDecimalField(parsed.run.bossMaxHp) ||
+        !isValidDecimalField(parsed.meta.divineCrystals)
+      ) {
+        return { ok: false, error: '存档数值校验失败：灵石、古神血量或神晶数值异常' };
+      }
+
+      const defMeta = createInitialMetaState();
+      const defMercs = createInitialMercsState();
+      const nextMeta: MetaState = {
+        ...defMeta,
+        ...parsed.meta,
+        totalPlayTimeMs: Number(parsed.meta.totalPlayTimeMs ?? 0) || 0,
+        totalClicks: parsed.meta.totalClicks ?? '0',
+        highestDps: parsed.meta.highestDps ?? '0',
+        totalRerolls: Number(parsed.meta.totalRerolls ?? 0) || 0,
+        shownTutorials: { ...defMeta.shownTutorials, ...(parsed.meta.shownTutorials ?? {}) },
+        relicLevels: { ...defMeta.relicLevels, ...(parsed.meta.relicLevels ?? {}) },
+        clearedTribulations: {
+          ...defMeta.clearedTribulations,
+          ...(parsed.meta.clearedTribulations ?? {}),
+        },
+        bestClearTimesMs: { ...(parsed.meta.bestClearTimesMs ?? {}) },
+        sssUnlockedAutoRepeat: { ...(parsed.meta.sssUnlockedAutoRepeat ?? {}) },
+      };
+
+      const nextMercs = parsed.mercs.map((m, i) => ({
+        ...defMercs[i],
+        ...m,
+        slotIndex: i,
+        archetype: FIXED_SLOT_ARCHETYPES[i],
+        levelAffixes: normalizeTenSlots<AffixInstance | null>(m.levelAffixes, null),
+        lockedLevelSlots: normalizeTenSlots<boolean>(m.lockedLevelSlots, false),
+        attackCount: Number(m.attackCount ?? 0) || 0,
+      }));
+
+      const baseRun = createInitialRunState(parsed.run.tribulationId, nextMeta);
+      const nextRun: RunState = {
+        ...baseRun,
+        ...parsed.run,
+        phaseIndex: Math.max(
+          0,
+          Math.min(BOSS_SHELLS.length - 1, Number(parsed.run.phaseIndex ?? 0) || 0)
+        ),
+        skills: {
+          sk_blood: { ...baseRun.skills.sk_blood, ...(parsed.run.skills?.sk_blood ?? {}) },
+          sk_clone: { ...baseRun.skills.sk_clone, ...(parsed.run.skills?.sk_clone ?? {}) },
+          sk_thunder: { ...baseRun.skills.sk_thunder, ...(parsed.run.skills?.sk_thunder ?? {}) },
+          sk_sync: { ...baseRun.skills.sk_sync, ...(parsed.run.skills?.sk_sync ?? {}) },
+        },
+        heroBuffStacks: Array.isArray(parsed.run.heroBuffStacks)
+          ? parsed.run.heroBuffStacks.filter(
+              (b) => typeof b?.val === 'number' && typeof b?.expiresAt === 'number'
+            )
+          : [],
+        recentTickDps: {
+          hero: parsed.run.recentTickDps?.hero ?? baseRun.recentTickDps.hero,
+          poison: parsed.run.recentTickDps?.poison ?? baseRun.recentTickDps.poison,
+          mercs:
+            Array.isArray(parsed.run.recentTickDps?.mercs) &&
+            parsed.run.recentTickDps.mercs.length === 5
+              ? (parsed.run.recentTickDps.mercs as [string, string, string, string, string])
+              : baseRun.recentTickDps.mercs,
+        },
+      };
+
+      const rawFloatMode = parsed.settings?.floatingTextMode;
+      const nextSettings: SettingsState = {
+        numberMode: parsed.settings?.numberMode === 'scientific' ? 'scientific' : 'chinese',
+        soundEnabled: parsed.settings?.soundEnabled ?? true,
+        buyMode:
+          parsed.settings?.buyMode === 10 || parsed.settings?.buyMode === 'MAX'
+            ? parsed.settings.buyMode
+            : 1,
+        floatingTextMode:
+          rawFloatMode === 'all' || rawFloatMode === 'crit' || rawFloatMode === 'off'
+            ? rawFloatMode
+            : 'all',
+        hitVfxEnabled:
+          typeof parsed.settings?.hitVfxEnabled === 'boolean'
+            ? parsed.settings.hitVfxEnabled
+            : true,
+        vibrationEnabled:
+          typeof parsed.settings?.vibrationEnabled === 'boolean'
+            ? parsed.settings.vibrationEnabled
+            : true,
+      };
+
+      const savedAt = Date.now();
+      metaRef.current = nextMeta;
+      mercsRef.current = nextMercs;
+      runRef.current = nextRun;
+      settingsRef.current = nextSettings;
+      setMeta(nextMeta);
+      setMercs(nextMercs);
+      setRun(nextRun);
+      setSettings(nextSettings);
+      setVictorySummary(null);
+      setAutoRepeatCountdown(null);
+      localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({
+          version: 35,
+          savedAt,
+          run: nextRun,
+          mercs: nextMercs,
+          meta: nextMeta,
+          settings: nextSettings,
+        })
+      );
+      setLastSavedAt(savedAt);
+      showToast('存档校验通过并导入成功！');
+      return { ok: true };
     },
     [showToast]
   );
 
-  const hardResetAll = useCallback(() => {
-    const freshMeta = createInitialMetaState();
-    const freshMercs = createInitialMercsState();
-    const freshRun = createInitialRunState('tier_1', freshMeta);
-    metaRef.current = freshMeta;
-    mercsRef.current = freshMercs;
-    runRef.current = freshRun;
-    puppetAccRef.current = 0;
-    cloneAccRef.current = 0;
-    poisonTickAccRef.current = 0;
-    setMeta(freshMeta);
-    setMercs(freshMercs);
-    setRun(freshRun);
-    setVictorySummary(null);
-    setAutoRepeatCountdown(null);
-    setActiveTutorial(null);
-    localStorage.removeItem(STORAGE_KEY);
-    showToast('已彻底清空全部进度');
-  }, [showToast]);
+  const hardResetAll = useCallback(
+    (reloadAfter = false) => {
+      isHardResettingRef.current = true;
+      localStorage.removeItem(STORAGE_KEY);
+      const freshMeta = createInitialMetaState();
+      const freshMercs = createInitialMercsState();
+      const freshRun = createInitialRunState('tier_1', freshMeta);
+      metaRef.current = freshMeta;
+      mercsRef.current = freshMercs;
+      runRef.current = freshRun;
+      puppetAccRef.current = 0;
+      cloneAccRef.current = 0;
+      poisonTickAccRef.current = 0;
+      setMeta(freshMeta);
+      setMercs(freshMercs);
+      setRun(freshRun);
+      setVictorySummary(null);
+      setAutoRepeatCountdown(null);
+      setActiveTutorial(null);
+
+      if (reloadAfter && typeof window !== 'undefined') {
+        window.location.reload();
+        return;
+      }
+
+      isHardResettingRef.current = false;
+      showToast('已彻底清空全部进度');
+    },
+    [showToast]
+  );
 
   const clearVictorySummary = useCallback(() => {
     setVictorySummary(null);
@@ -2541,6 +2827,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         setBuyMode,
         setNumberMode,
         setSoundEnabled,
+        setFloatingTextMode,
+        setHitVfxEnabled,
+        setVibrationEnabled,
+        lastSavedAt,
+        saveNow,
         exportSaveString,
         importSaveString,
         hardResetAll,

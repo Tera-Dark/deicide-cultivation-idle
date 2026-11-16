@@ -1,6 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
+  Activity,
+  BarChart3,
   Bot,
+  CheckCircle2,
+  Clock,
   Crown,
   AlertTriangle,
   ArrowRight,
@@ -11,15 +15,21 @@ import {
   Film,
   Lock,
   LockOpen,
+  MousePointerClick,
   Play,
   RefreshCw,
   Repeat,
+  Save,
+  ShieldAlert,
+  Smartphone,
   Sparkles,
   Trophy,
+  Type,
   Upload,
   Volume2,
   VolumeX,
   X,
+  Zap,
 } from 'lucide-react';
 import {
   AFFIXES,
@@ -699,11 +709,279 @@ export function RestartModal({ open, onClose }: { open: boolean; onClose: () => 
   );
 }
 
+function formatCareerDuration(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const mins = Math.floor((totalSeconds % 3600) / 60);
+  const secs = totalSeconds % 60;
+  const pad = (n: number) => String(n).padStart(2, '0');
+  if (hours > 0) {
+    return `${hours}时 ${pad(mins)}分 ${pad(secs)}秒`;
+  }
+  return `${pad(mins)}分 ${pad(secs)}秒`;
+}
+
+export function StatsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
+  const { meta, settings } = useGameStore();
+  if (!open) return null;
+
+  const statRows = [
+    {
+      label: '累计游玩时间',
+      value: formatCareerDuration(meta.totalPlayTimeMs),
+      icon: Clock,
+      accent: 'text-[#38bdf8]',
+      border: 'border-[#38bdf8]/30',
+    },
+    {
+      label: '累计点击次数',
+      value: formatNumber(meta.totalClicks, settings.numberMode),
+      icon: MousePointerClick,
+      accent: 'text-[#6ee7b7]',
+      border: 'border-[#34d399]/30',
+    },
+    {
+      label: '历史最高 DPS',
+      value: `${formatNumber(meta.highestDps, settings.numberMode, true)}/s`,
+      icon: Activity,
+      accent: 'text-[#fbbf24]',
+      border: 'border-[#fbbf24]/30',
+    },
+    {
+      label: '累计弑神次数',
+      value: `${meta.totalSlays.toLocaleString('en-US')} 次`,
+      icon: Trophy,
+      accent: 'text-[#fda4af]',
+      border: 'border-[#f43f5e]/30',
+    },
+    {
+      label: '累计洗练次数',
+      value: `${meta.totalRerolls.toLocaleString('en-US')} 次`,
+      icon: Dices,
+      accent: 'text-[#c084fc]',
+      border: 'border-[#c084fc]/30',
+    },
+  ];
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-3"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="stats-modal-title"
+    >
+      <div className="w-full max-w-[400px] bg-[#151827] border border-[#2e3552] rounded-xl p-5 shadow-2xl space-y-4">
+        <div className="flex items-center justify-between gap-2 border-b border-[#2e3552] pb-3">
+          <div className="flex items-center gap-2">
+            <BarChart3 className="w-4 h-4 text-[#38bdf8]" />
+            <h2 id="stats-modal-title" className="font-display text-base font-black text-[#f4f1ea]">
+              生涯统计
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-md text-[#94a3b8] hover:text-white hover:bg-white/10 cursor-pointer"
+            aria-label="关闭生涯统计"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <div className="space-y-2.5">
+          {statRows.map((row) => {
+            const Icon = row.icon;
+            return (
+              <div
+                key={row.label}
+                className={`flex items-center justify-between gap-3 bg-[#101322] border ${row.border} rounded-lg px-3.5 py-2.5`}
+              >
+                <span className="inline-flex items-center gap-2 text-xs text-[#cbd5e1]">
+                  <Icon className={`w-3.5 h-3.5 shrink-0 ${row.accent}`} />
+                  <span>{row.label}</span>
+                </span>
+                <span className={`font-mono-num text-sm font-extrabold ${row.accent}`}>
+                  {row.value}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="flex items-center justify-between text-[11px] text-[#94a3b8] pt-1">
+          <span>累计兵解重开：{meta.totalRestarts} 次</span>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-1.5 rounded-md text-xs font-medium bg-[#1e2338] border border-[#384166] text-[#e2e8f0] hover:bg-[#272e49] cursor-pointer"
+          >
+            返回设置
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const SEAL_CARDS = [
+  {
+    id: 'seal_run',
+    label: '① 确认抹除灵石、境界与神通',
+    posClass: 'col-start-1 row-start-1',
+  },
+  {
+    id: 'seal_mercs',
+    label: '② 确认抹除五人护法与全部词缀',
+    posClass: 'col-start-2 row-start-1',
+  },
+  {
+    id: 'seal_meta',
+    label: '③ 确认抹除遗物、神晶与劫数记录',
+    posClass: 'col-start-1 row-start-2',
+  },
+] as const;
+
+export function HardResetConfirmModal({
+  open,
+  onClose,
+  onConfirmDestroy,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onConfirmDestroy: () => void;
+}) {
+  const [activated, setActivated] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (open) {
+      setActivated({});
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  const activatedCount = SEAL_CARDS.filter((s) => activated[s.id]).length;
+  const allUnlocked = activatedCount === SEAL_CARDS.length;
+
+  const toggleSeal = (id: string) => {
+    setActivated((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/85 backdrop-blur-md p-3"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="hard-reset-title"
+    >
+      <div className="w-full max-w-[440px] bg-[#12131f] border border-[#f43f5e]/55 rounded-xl p-5 shadow-[0_0_45px_rgba(225,29,72,0.28)] space-y-4">
+        <div className="flex items-start justify-between gap-2 border-b border-[#f43f5e]/25 pb-3">
+          <div className="space-y-1">
+            <div className="inline-flex items-center gap-1.5 text-[11px] font-mono-num tracking-wider text-[#fb7185]">
+              <ShieldAlert className="w-3.5 h-3.5" />
+              <span>五重异位解印 · 防误触保护</span>
+            </div>
+            <h2
+              id="hard-reset-title"
+              className="font-display text-base font-black tracking-wide text-[#ffe4e6] text-glow-crimson"
+            >
+              自毁道基 · 永久删档
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="p-1.5 rounded-md text-[#94a3b8] hover:text-white hover:bg-white/10 cursor-pointer"
+            aria-label="取消删档"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+
+        <p className="text-xs text-[#cbd5e1] leading-relaxed">
+          此操作将<span className="text-[#fda4af] font-semibold">彻底清除</span>全部本地修为与永久传承，不可逆转。请依次点击下方错位分布的 3 枚封印卡片以解除自毁禁制：
+        </p>
+
+        {/* Staggered 2x2 Seal Matrix: Top-Left, Top-Right, Bottom-Left */}
+        <div className="grid grid-cols-2 grid-rows-2 gap-2.5">
+          {SEAL_CARDS.map((card) => {
+            const active = Boolean(activated[card.id]);
+            return (
+              <button
+                key={card.id}
+                type="button"
+                onClick={() => toggleSeal(card.id)}
+                className={`${card.posClass} text-left rounded-lg p-3 border transition-all cursor-pointer flex flex-col justify-between gap-2 min-h-[78px] ${
+                  active
+                    ? 'bg-[#e11d48]/22 border-[#fb7185] text-[#fff1f2] shadow-[0_0_16px_rgba(244,63,94,0.28)]'
+                    : 'bg-[#0c0e18] border-[#2e3552] text-[#cbd5e1] hover:border-[#f43f5e]/55 hover:bg-[#191525]'
+                }`}
+              >
+                <div className="flex items-center justify-between gap-1.5">
+                  <span className="text-[10px] font-mono-num tracking-wider text-[#94a3b8]">
+                    {active ? '已解印' : '待确认'}
+                  </span>
+                  {active ? (
+                    <CheckCircle2 className="w-3.5 h-3.5 text-[#fb7185] shrink-0" />
+                  ) : (
+                    <Lock className="w-3.5 h-3.5 text-[#64748b] shrink-0" />
+                  )}
+                </div>
+                <span className="text-[11.5px] font-semibold leading-snug">{card.label}</span>
+              </button>
+            );
+          })}
+
+          {/* Bottom-Right Spacer Chamber */}
+          <div className="col-start-2 row-start-2 rounded-lg border border-dashed border-[#2e3552]/70 bg-[#0a0c14]/60 flex flex-col items-center justify-center p-2 text-center select-none">
+            <PhaseBreakSigilIcon
+              className={`w-7 h-7 transition-colors ${
+                allUnlocked ? 'text-[#f43f5e]' : 'text-[#334155]'
+              }`}
+            />
+            <span className="mt-1 font-mono-num text-[10px] text-[#94a3b8]">
+              封印解除 {activatedCount} / 3
+            </span>
+          </div>
+        </div>
+
+        <div className="pt-2 border-t border-white/10 flex flex-col items-center gap-2.5">
+          <button
+            type="button"
+            disabled={!allUnlocked}
+            onClick={onConfirmDestroy}
+            className={`w-full py-2.5 px-4 rounded-md text-xs font-display font-black tracking-wider transition-all ${
+              allUnlocked
+                ? 'bg-[#e11d48] hover:bg-[#be123c] text-white shadow-[0_0_22px_rgba(225,29,72,0.5)] cursor-pointer'
+                : 'bg-[#1a1c29] border border-[#2e3552] text-[#64748b] cursor-not-allowed'
+            }`}
+          >
+            彻底销毁全部存档（不可恢复）
+          </button>
+
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-[11px] text-[#94a3b8] hover:text-white cursor-pointer"
+          >
+            保留道基，返回设置
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const {
     settings,
+    lastSavedAt,
+    saveNow,
     setNumberMode,
     setSoundEnabled,
+    setFloatingTextMode,
+    setHitVfxEnabled,
+    setVibrationEnabled,
     replayIntro,
     exportSaveString,
     importSaveString,
@@ -712,26 +990,48 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
 
   const [saveText, setSaveText] = useState('');
   const [copied, setCopied] = useState(false);
+  const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
-  const [confirmReset, setConfirmReset] = useState(false);
+  const [showHardReset, setShowHardReset] = useState(false);
+  const [showStats, setShowStats] = useState(false);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+
+  useEffect(() => {
+    if (!open) return;
+    setNowTick(Date.now());
+    const timer = window.setInterval(() => {
+      setNowTick(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [open]);
 
   if (!open) return null;
+
+  const secondsSinceSave = Math.max(0, Math.floor((nowTick - lastSavedAt) / 1000));
 
   const handleExport = () => {
     const str = exportSaveString();
     setSaveText(str);
     setImportError(null);
-    navigator.clipboard
-      ?.writeText(str)
-      .then(() => {
-        setCopied(true);
-        window.setTimeout(() => setCopied(false), 1800);
-      })
-      .catch(() => {});
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      navigator.clipboard
+        .writeText(str)
+        .then(() => {
+          setCopied(true);
+          setExportNotice('存档串已生成并自动复制到剪贴板');
+          window.setTimeout(() => setCopied(false), 2000);
+        })
+        .catch(() => {
+          setExportNotice('已生成存档串，请手动全选文本框复制');
+        });
+    } else {
+      setExportNotice('已生成存档串，请手动全选文本框复制');
+    }
   };
 
   const handleImport = () => {
     setImportError(null);
+    setExportNotice(null);
     const res = importSaveString(saveText);
     if (!res.ok) {
       setImportError(res.error ?? '导入失败');
@@ -741,171 +1041,265 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-3"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="settings-title"
-    >
-      <div className="w-full max-w-[430px] bg-[#151827] border border-[#2e3552] rounded-xl p-5 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between">
-          <h2 id="settings-title" className="font-display text-base font-bold text-[#f4f1ea]">
-            系统设置与存档
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="p-1.5 rounded-md text-[#94a3b8] hover:text-white hover:bg-white/10 cursor-pointer"
-            aria-label="关闭"
-          >
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
-        <div className="space-y-3 border-b border-[#2e3552] pb-3.5">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <span className="text-xs font-medium text-[#f4f1ea] block">大数显示制式</span>
-              <span className="text-[11px] text-[#94a3b8]">中式单位 / 科学计数</span>
-            </div>
-            <div className="flex items-center gap-1 p-1 bg-[#101322] border border-[#2e3552] rounded-md shrink-0">
-              <button
-                type="button"
-                onClick={() => setNumberMode('chinese')}
-                className={`px-2.5 py-1 text-[11px] rounded cursor-pointer ${
-                  settings.numberMode === 'chinese'
-                    ? 'bg-[#06b6d4]/25 text-[#67e8f9]'
-                    : 'text-[#94a3b8] hover:text-white'
-                }`}
-              >
-                中式大数
-              </button>
-              <button
-                type="button"
-                onClick={() => setNumberMode('scientific')}
-                className={`px-2.5 py-1 text-[11px] rounded cursor-pointer ${
-                  settings.numberMode === 'scientific'
-                    ? 'bg-[#06b6d4]/25 text-[#67e8f9]'
-                    : 'text-[#94a3b8] hover:text-white'
-                }`}
-              >
-                科学计数
-              </button>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <span className="text-xs font-medium text-[#f4f1ea] block">合成音效</span>
-              <span className="text-[11px] text-[#94a3b8]">攻击、神通与破壳音效</span>
-            </div>
+    <>
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-3"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="settings-title"
+      >
+        <div className="w-full max-w-[440px] max-h-[88dvh] bg-[#151827] border border-[#2e3552] rounded-xl shadow-2xl flex flex-col overflow-hidden">
+          <div className="shrink-0 px-5 pt-4 pb-3 border-b border-[#2e3552] flex items-center justify-between">
+            <h2 id="settings-title" className="font-display text-base font-bold text-[#f4f1ea]">
+              系统设置与存档
+            </h2>
             <button
               type="button"
-              onClick={() => setSoundEnabled(!settings.soundEnabled)}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#384166] bg-[#1e2338] text-[#e2e8f0] hover:bg-[#272e49] cursor-pointer shrink-0"
+              onClick={onClose}
+              className="p-1.5 rounded-md text-[#94a3b8] hover:text-white hover:bg-white/10 cursor-pointer"
+              aria-label="关闭"
             >
-              {settings.soundEnabled ? (
-                <>
-                  <Volume2 className="w-3.5 h-3.5 text-[#34d399]" />
-                  <span>已开启</span>
-                </>
-              ) : (
-                <>
-                  <VolumeX className="w-3.5 h-3.5 text-[#94a3b8]" />
-                  <span>已静音</span>
-                </>
-              )}
+              <X className="w-4 h-4" />
             </button>
           </div>
 
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <span className="text-xs font-medium text-[#f4f1ea] block">世界观序章</span>
-              <span className="text-[11px] text-[#94a3b8]">重温开场三幕剧情演算</span>
+          <div className="flex-1 min-h-0 overflow-y-auto custom-scroll px-5 py-3.5 space-y-3.5">
+            {/* Performance & UX Settings */}
+            <div className="space-y-3 border-b border-[#2e3552] pb-3.5">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-xs font-medium text-[#f4f1ea] block">大数显示制式</span>
+                  <span className="text-[11px] text-[#94a3b8]">中式单位 / 科学计数</span>
+                </div>
+                <div className="flex items-center gap-1 p-1 bg-[#101322] border border-[#2e3552] rounded-md shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setNumberMode('chinese')}
+                    className={`px-2.5 py-1 text-[11px] rounded cursor-pointer ${
+                      settings.numberMode === 'chinese'
+                        ? 'bg-[#06b6d4]/25 text-[#67e8f9]'
+                        : 'text-[#94a3b8] hover:text-white'
+                    }`}
+                  >
+                    中式大数
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setNumberMode('scientific')}
+                    className={`px-2.5 py-1 text-[11px] rounded cursor-pointer ${
+                      settings.numberMode === 'scientific'
+                        ? 'bg-[#06b6d4]/25 text-[#67e8f9]'
+                        : 'text-[#94a3b8] hover:text-white'
+                    }`}
+                  >
+                    科学计数
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#f4f1ea]">
+                    <Type className="w-3.5 h-3.5 text-[#38bdf8]" />
+                    <span>伤害飘字显示</span>
+                  </span>
+                  <span className="text-[11px] text-[#94a3b8] block">高攻速挂机时可减少屏幕遮挡</span>
+                </div>
+                <div className="flex items-center gap-0.5 p-1 bg-[#101322] border border-[#2e3552] rounded-md shrink-0">
+                  {(
+                    [
+                      { id: 'all', label: '全部显示' },
+                      { id: 'crit', label: '仅暴击' },
+                      { id: 'off', label: '关闭' },
+                    ] as const
+                  ).map((opt) => (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => setFloatingTextMode(opt.id)}
+                      className={`px-2 py-1 text-[11px] rounded cursor-pointer ${
+                        settings.floatingTextMode === opt.id
+                          ? 'bg-[#06b6d4]/25 text-[#67e8f9]'
+                          : 'text-[#94a3b8] hover:text-white'
+                      }`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#f4f1ea]">
+                    <Zap className="w-3.5 h-3.5 text-[#fbbf24]" />
+                    <span>受击特效与震屏</span>
+                  </span>
+                  <span className="text-[11px] text-[#94a3b8] block">
+                    关闭以停用闪白、粒子与震屏（省电护眼）
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setHitVfxEnabled(!settings.hitVfxEnabled)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border cursor-pointer shrink-0 transition-colors ${
+                    settings.hitVfxEnabled
+                      ? 'border-[#34d399]/50 bg-[#10b981]/18 text-[#a7f3d0]'
+                      : 'border-[#384166] bg-[#1e2338] text-[#94a3b8] hover:text-white'
+                  }`}
+                >
+                  <span>{settings.hitVfxEnabled ? '已开启' : '已关闭'}</span>
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="inline-flex items-center gap-1.5 text-xs font-medium text-[#f4f1ea]">
+                    <Smartphone className="w-3.5 h-3.5 text-[#c084fc]" />
+                    <span>手机震动反馈</span>
+                  </span>
+                  <span className="text-[11px] text-[#94a3b8] block">
+                    破壳、天罚神雷及洗出紫/金词缀时短震
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setVibrationEnabled(!settings.vibrationEnabled)}
+                  className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border cursor-pointer shrink-0 transition-colors ${
+                    settings.vibrationEnabled
+                      ? 'border-[#c084fc]/50 bg-[#a855f7]/18 text-[#e9d5ff]'
+                      : 'border-[#384166] bg-[#1e2338] text-[#94a3b8] hover:text-white'
+                  }`}
+                >
+                  <span>{settings.vibrationEnabled ? '已开启' : '已关闭'}</span>
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="text-xs font-medium text-[#f4f1ea] block">合成音效</span>
+                  <span className="text-[11px] text-[#94a3b8]">攻击、神通与破壳音效</span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSoundEnabled(!settings.soundEnabled)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#384166] bg-[#1e2338] text-[#e2e8f0] hover:bg-[#272e49] cursor-pointer shrink-0"
+                >
+                  {settings.soundEnabled ? (
+                    <>
+                      <Volume2 className="w-3.5 h-3.5 text-[#34d399]" />
+                      <span>已开启</span>
+                    </>
+                  ) : (
+                    <>
+                      <VolumeX className="w-3.5 h-3.5 text-[#94a3b8]" />
+                      <span>已静音</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
-            <button
-              type="button"
-              onClick={() => {
-                onClose();
-                replayIntro();
-              }}
-              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#38bdf8]/45 bg-[#06b6d4]/15 text-[#cffafe] hover:bg-[#06b6d4]/28 cursor-pointer shrink-0"
-            >
-              <Film className="w-3.5 h-3.5 text-[#22d3ee]" />
-              <span>重温序章</span>
-            </button>
-          </div>
-        </div>
 
-        <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <span className="text-xs font-medium text-[#f4f1ea]">Base64 存档导入/导出</span>
-            <div className="flex items-center gap-1.5">
+            {/* Career Stats & Story Replay */}
+            <div className="grid grid-cols-2 gap-2 border-b border-[#2e3552] pb-3.5">
               <button
                 type="button"
-                onClick={handleExport}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium bg-[#06b6d4]/22 border border-[#22d3ee]/50 text-[#cffafe] hover:bg-[#06b6d4]/35 cursor-pointer"
+                onClick={() => setShowStats(true)}
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium border border-[#38bdf8]/40 bg-[#06b6d4]/12 text-[#cffafe] hover:bg-[#06b6d4]/24 cursor-pointer"
               >
-                {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
-                <span>{copied ? '已复制' : '导出'}</span>
-              </button>
-              <button
-                type="button"
-                onClick={handleImport}
-                disabled={!saveText.trim()}
-                className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium bg-[#10b981]/22 border border-[#34d399]/50 text-[#a7f3d0] hover:bg-[#10b981]/35 disabled:opacity-40 cursor-pointer"
-              >
-                <Upload className="w-3 h-3" />
-                <span>导入</span>
-              </button>
-            </div>
-          </div>
-
-          <textarea
-            value={saveText}
-            onChange={(e) => setSaveText(e.target.value)}
-            placeholder="导出获取 Base64 存档串，或粘贴后点击导入..."
-            rows={3}
-            className="w-full rounded-md bg-[#0d101b] border border-[#2e3552] p-2 text-xs font-mono text-[#e2e8f0] placeholder:text-[#64748b] focus:outline-none focus:border-[#38bdf8]"
-          />
-          {importError && <p className="text-xs text-[#fda4af]">{importError}</p>}
-        </div>
-
-        <div className="pt-3 border-t border-[#2e3552] flex items-center justify-between gap-2">
-          <span className="text-[11px] text-[#94a3b8]">自动保存至本地</span>
-          {!confirmReset ? (
-            <button
-              type="button"
-              onClick={() => setConfirmReset(true)}
-              className="px-3 py-1.5 rounded-md text-xs font-medium text-[#fda4af] border border-[#f43f5e]/45 hover:bg-[#f43f5e]/15 cursor-pointer"
-            >
-              硬重置存档
-            </button>
-          ) : (
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setConfirmReset(false)}
-                className="px-2 py-1 rounded text-xs text-[#94a3b8] hover:text-white cursor-pointer"
-              >
-                取消
+                <BarChart3 className="w-3.5 h-3.5 text-[#22d3ee]" />
+                <span>生涯统计</span>
               </button>
               <button
                 type="button"
                 onClick={() => {
-                  hardResetAll();
-                  setConfirmReset(false);
                   onClose();
+                  replayIntro();
                 }}
-                className="px-2.5 py-1 rounded text-xs font-medium bg-[#e11d48] text-white hover:bg-[#be123c] cursor-pointer"
+                className="inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-md text-xs font-medium border border-[#384166] bg-[#1e2338] text-[#e2e8f0] hover:bg-[#272e49] cursor-pointer"
               >
-                确认清空
+                <Film className="w-3.5 h-3.5 text-[#38bdf8]" />
+                <span>重温序章</span>
               </button>
             </div>
-          )}
+
+            {/* Base64 Export / Import */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs font-medium text-[#f4f1ea]">Base64 存档导入/导出</span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleExport}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium bg-[#06b6d4]/22 border border-[#22d3ee]/50 text-[#cffafe] hover:bg-[#06b6d4]/35 cursor-pointer"
+                  >
+                    {copied ? <Check className="w-3 h-3" /> : <Copy className="w-3 h-3" />}
+                    <span>{copied ? '已复制' : '导出'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleImport}
+                    disabled={!saveText.trim()}
+                    className="inline-flex items-center gap-1 px-2.5 py-1 rounded text-[11px] font-medium bg-[#10b981]/22 border border-[#34d399]/50 text-[#a7f3d0] hover:bg-[#10b981]/35 disabled:opacity-40 cursor-pointer"
+                  >
+                    <Upload className="w-3 h-3" />
+                    <span>导入</span>
+                  </button>
+                </div>
+              </div>
+
+              <textarea
+                value={saveText}
+                onChange={(e) => {
+                  setSaveText(e.target.value);
+                  setImportError(null);
+                  setExportNotice(null);
+                }}
+                placeholder="导出获取 Base64 存档串，或粘贴后点击导入..."
+                rows={3}
+                className="w-full rounded-md bg-[#0d101b] border border-[#2e3552] p-2 text-xs font-mono text-[#e2e8f0] placeholder:text-[#64748b] focus:outline-none focus:border-[#38bdf8]"
+              />
+              {exportNotice && <p className="text-xs text-[#6ee7b7]">{exportNotice}</p>}
+              {importError && <p className="text-xs text-[#fda4af]">{importError}</p>}
+            </div>
+          </div>
+
+          {/* Footer: Live Auto-Save Status + Save Now + 5-Step Hard Reset Trigger */}
+          <div className="shrink-0 px-5 py-3 border-t border-[#2e3552] bg-[#111422] flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="font-mono-num text-[11px] text-[#94a3b8] truncate">
+                已自动保存 ({secondsSinceSave}秒前)
+              </span>
+              <button
+                type="button"
+                onClick={saveNow}
+                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium border border-[#38bdf8]/40 bg-[#06b6d4]/15 text-[#cffafe] hover:bg-[#06b6d4]/28 cursor-pointer shrink-0"
+              >
+                <Save className="w-3 h-3" />
+                <span>立即保存</span>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowHardReset(true)}
+              className="px-3 py-1.5 rounded-md text-xs font-medium text-[#fda4af] bg-[#f43f5e]/10 border border-[#f43f5e]/45 hover:bg-[#f43f5e]/20 cursor-pointer shrink-0"
+            >
+              硬重置存档
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+
+      <StatsModal open={showStats} onClose={() => setShowStats(false)} />
+      <HardResetConfirmModal
+        open={showHardReset}
+        onClose={() => setShowHardReset(false)}
+        onConfirmDestroy={() => {
+          hardResetAll(true);
+        }}
+      />
+    </>
   );
 }
 
