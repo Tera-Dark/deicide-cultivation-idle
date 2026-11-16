@@ -30,13 +30,13 @@ export const BASE_MANA_REGEN = 1.0;
 export const BASE_MANUAL_CLICK_MANA = 0.8;
 
 export const ENLIGHTENMENT_BASE_COST = 25;
-export const ENLIGHTENMENT_COST_GROWTH = 1.38;
+export const ENLIGHTENMENT_COST_GROWTH = 1.42;
 
 export const PUPPET_UNLOCK_COST = 60;
 export const PUPPET_COST_GROWTH = 1.28;
 export const PUPPET_MAX_LEVEL = 50;
 
-export const MERC_SLOT_CRYSTAL_COSTS = [0, 10, 150, 3000, 50000] as const;
+export const MERC_SLOT_CRYSTAL_COSTS = [0, 20, 400, 8000, 150000] as const;
 
 export const LEVEL_SLOT_THRESHOLDS = [10, 25, 50, 100, 200, 350, 500, 650, 800, 1000] as const;
 
@@ -76,7 +76,7 @@ export const REALM_TIERS: RealmTierConfig[] = [
     name: '百脉筑基',
     reqStones: 800,
     reqClicks: 50,
-    multiplier: 3,
+    multiplier: 2.5,
     rewardNote: '解锁第2神通【万法残影】',
   },
   {
@@ -84,7 +84,7 @@ export const REALM_TIERS: RealmTierConfig[] = [
     name: '煞气金丹',
     reqStones: 25000,
     reqClicks: 250,
-    multiplier: 10,
+    multiplier: 8,
     rewardNote: '解锁第3神通【天罚神雷】',
   },
   {
@@ -92,7 +92,7 @@ export const REALM_TIERS: RealmTierConfig[] = [
     name: '不灭元婴',
     reqStones: 1.5e6,
     reqClicks: 1000,
-    multiplier: 40,
+    multiplier: 28,
     rewardNote: '解锁第4神通【弑神共鸣】',
   },
   {
@@ -100,7 +100,7 @@ export const REALM_TIERS: RealmTierConfig[] = [
     name: '法则化神',
     reqStones: 2.0e8,
     reqClicks: 3000,
-    multiplier: 200,
+    multiplier: 120,
     rewardNote: '道力上限 +50 · 自然回蓝 +1.5/秒',
   },
 ];

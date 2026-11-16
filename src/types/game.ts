@@ -68,7 +68,7 @@ export type InnateAffixId =
 
 export type SkillId = 'sk_blood' | 'sk_clone' | 'sk_thunder' | 'sk_sync';
 
-export type RelicTier = 'common' | 'rare' | 'epic' | 'mythic';
+export type RelicTier = 'common' | 'rare' | 'mystic' | 'saint' | 'epic' | 'mythic';
 
 export type RelicId =
   | 'rel_c_click_flat'
@@ -197,8 +197,10 @@ export interface MetaState {
   hasSeenIntro: boolean;
   shownTutorials: Record<TutorialNodeId, boolean>;
   clearedTribulations: Record<TribulationId, boolean>;
+  clearCounts: Record<TribulationId, number>;
   ngPlusCount: number;
   relicLevels: Record<RelicId, number>;
+  relicDropLevels: Record<RelicId, number>;
   rerollPity: number;
   highestUnlockedOrder: number;
   bestClearTimesMs: Partial<Record<TribulationId, number>>;
@@ -250,6 +252,25 @@ export interface PhaseBreakBanner {
   stones: number;
 }
 
+export interface VictoryRelicDropItem {
+  relicId: RelicId;
+  tier: RelicTier;
+  name: string;
+  levelsAdded: number;
+  newDropLevel: number;
+  crystalLevel: number;
+  totalLevel: number;
+  isNew: boolean;
+}
+
+export interface VictoryOverflowDropItem {
+  relicId: RelicId;
+  tier: RelicTier;
+  name: string;
+  count: number;
+  crystalsGained: string;
+}
+
 export interface VictorySummary {
   tribulationId: TribulationId;
   tribulationName: string;
@@ -257,8 +278,11 @@ export interface VictorySummary {
   rank: SpeedrunRank;
   rankCrystalMult: number;
   crystalsEarned: string;
+  overflowCrystalBonus: string;
   isNewRecord: boolean;
   firstClearNote: string | null;
+  relicDrops: VictoryRelicDropItem[];
+  convertedOverflowDrops: VictoryOverflowDropItem[];
   grantedRelicUpgrades: {
     relicId: RelicId;
     name: string;
@@ -273,6 +297,14 @@ export interface VictorySummary {
   } | null;
   unlockedNextOrder: number | null;
   unlockedSssAutoRepeat: boolean;
+  nextUnlockProgress: {
+    nextOrder: number;
+    nextName: string;
+    prevClears: number;
+    reqClears: number;
+    totalRelicLevels: number;
+    reqRelicLevels: number;
+  } | null;
 }
 
 export interface ArchetypeConfig {
@@ -316,6 +348,7 @@ export interface RelicConfig {
   tier: RelicTier;
   name: string;
   maxLevel: number | null;
+  maxDropLevel: number | null;
   baseCost: number;
   costGrowth: number;
   description: string;
@@ -351,6 +384,10 @@ export interface TribulationConfig {
   debuff: TribulationDebuff;
   baseCrystalReward: number;
   firstClearSummary: string;
+  relicDropTier: RelicTier;
+  relicDropCount: number;
+  unlockReqPrevClears: number;
+  unlockReqRelicLevels: number;
   bonusRelicLevels: number;
   mythicDropChance: number;
 }

@@ -17,6 +17,7 @@ import {
   getHeroStats,
   getMercCheapDiscount,
   getMercenaryComputedStats,
+  getRelicTotalLv,
   isSlot5Active,
 } from '../core/damageCalc';
 import { MERC_TYPOGRAPHY } from '../config/highlights';
@@ -38,22 +39,22 @@ export function TabMercenaries({
   const heroStats = getHeroStats(run, mercs, meta);
   const globalMult = getGlobalMult(run, mercs, meta);
   const costRed = getCostReductionMult(meta);
-  const firstAffixRelicLv = meta.relicLevels.rel_m_first_affix ?? 0;
+  const firstAffixRelicLv = getRelicTotalLv(meta, 'rel_m_first_affix');
   const s5 = isSlot5Active(mercs);
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2.5">
       {/* Top Helper & Build Guide Entry */}
-      <div className="flex items-center justify-between gap-2 px-1 text-[11px] text-[#a3b1cc]">
+      <div className="flex items-center justify-between gap-2 px-0.5 text-xs text-[#a3b1cc]">
         <button
           type="button"
           onClick={onOpenGuideModal}
-          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#181d31] border border-[#38bdf8]/45 text-[#7dd3fc] font-semibold hover:bg-[#06b6d4]/20 transition-colors cursor-pointer"
+          className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 rounded-lg bg-[#181d31] border border-[#38bdf8]/45 text-[#7dd3fc] font-bold hover:bg-[#06b6d4]/20 transition-colors cursor-pointer"
         >
-          <BookOpen className="w-3.5 h-3.5" />
+          <BookOpen className="w-4 h-4 shrink-0" />
           <span>流派协同指南</span>
         </button>
-        <span className="font-mono-num font-semibold text-[#fbbf24] shrink-0">
+        <span className="font-mono-num text-xs font-bold text-[#fbbf24] shrink-0">
           保底气运 {meta.rerollPity}/10
         </span>
       </div>
@@ -69,20 +70,23 @@ export function TabMercenaries({
           return (
             <div
               key={idx}
-              className="bg-[#131624] border border-[#2e3552] rounded-lg p-2.5 flex items-center justify-between gap-2.5"
+              className="bg-[#131624] border border-[#2e3552] rounded-xl p-3.5 flex items-center justify-between gap-3"
             >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-1.5">
-                  <ArchetypeIcon archetype={slot.archetype} className="w-4 h-4 opacity-60 self-center" />
-                  <span className="font-mono-num text-[11px] text-[#64748b]">{idx + 1}号</span>
-                  <span className={`text-[13px] opacity-85 ${mercTheme.nameClass}`}>
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex items-baseline gap-1.5 flex-wrap">
+                  <ArchetypeIcon
+                    archetype={slot.archetype}
+                    className="w-5 h-5 opacity-65 self-center shrink-0"
+                  />
+                  <span className="font-mono-num text-xs text-[#64748b]">{idx + 1}号</span>
+                  <span className={`text-[15px] opacity-90 ${mercTheme.nameClass}`}>
                     {arch.name}
                   </span>
-                  <span className={`text-[10px] ${mercTheme.roleClass} opacity-75`}>
+                  <span className={`text-xs ${mercTheme.roleClass} opacity-80`}>
                     ({arch.roleTag})
                   </span>
                 </div>
-                <p className="text-[11px] text-[#94a3b8] truncate mt-0.5">
+                <p className="text-xs text-[#94a3b8] leading-snug">
                   {idx === 0
                     ? '首破第 2 重躯壳免费解锁'
                     : `天赋：${arch.talent1Name} · ${arch.talent2Name}`}
@@ -94,20 +98,20 @@ export function TabMercenaries({
                   type="button"
                   onClick={() => unlockMercSlot(idx)}
                   disabled={!canUnlock}
-                  className={`min-w-[96px] px-2.5 py-1.5 rounded-md text-xs font-medium text-right shrink-0 transition-colors cursor-pointer ${
+                  className={`min-h-[48px] min-w-[112px] px-3 py-2 rounded-lg text-[13px] font-medium text-right shrink-0 transition-colors cursor-pointer flex flex-col justify-center ${
                     canUnlock
                       ? 'bg-[#a855f7]/28 border border-[#c084fc]/60 text-[#faf5ff] hover:bg-[#a855f7]/40'
                       : 'bg-[#1e2235] border border-[#2e3552] text-[#64748b] cursor-not-allowed'
                   }`}
                 >
-                  <div className="font-semibold leading-tight">解锁护法</div>
-                  <div className="font-mono-num text-[10px] opacity-90">
+                  <div className="font-bold leading-tight">解锁护法</div>
+                  <div className="font-mono-num text-[11px] opacity-90 mt-0.5">
                     {crystalCost.toLocaleString()} 神晶
                   </div>
                 </button>
               ) : (
-                <span className="inline-flex items-center gap-1 px-2.5 py-2 rounded-md text-[11px] text-[#94a3b8] bg-[#101322] border border-[#2e3552] shrink-0">
-                  <Lock className="w-3 h-3" />
+                <span className="min-h-[48px] min-w-[108px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs text-[#94a3b8] bg-[#101322] border border-[#2e3552] shrink-0 whitespace-nowrap">
+                  <Lock className="w-3.5 h-3.5" />
                   <span>破2重开</span>
                 </span>
               )}
@@ -138,158 +142,151 @@ export function TabMercenaries({
 
         const effLv = getEffectiveLevel(slot);
         const nextThreshold = LEVEL_SLOT_THRESHOLDS.find((t) => effLv < t);
-        const innateCfg = INNATE_AFFIXES[slot.innateAffix];
+        const innateCfg =
+          INNATE_AFFIXES[slot.innateAffix] ??
+          INNATE_AFFIXES[ARCHETYPES[slot.archetype].recommendedInnate];
         const hasInnateBoost = slot.innateAffix === 'sp_affix_boost';
         const hasPending =
           slot.pendingLevelAffixes !== null || slot.pendingInnateAffix !== null;
 
+        const activeSummaries: { text: string; colorClass: string }[] = [];
+        for (let sIdx = 0; sIdx < slot.unlockedLevelSlots; sIdx++) {
+          if (effLv < LEVEL_SLOT_THRESHOLDS[sIdx]) continue;
+          const inst = slot.levelAffixes[sIdx];
+          if (!inst) continue;
+          const cfg = AFFIXES[inst.id];
+          const tMeta = AFFIX_TIER_META[inst.tier];
+          if (!cfg || !tMeta) continue;
+          const effVal = getAffixEffectiveValue(
+            inst,
+            sIdx,
+            s5,
+            hasInnateBoost,
+            firstAffixRelicLv
+          );
+          activeSummaries.push({
+            text: `${cfg.name} ${formatAffixShortBadgeValue(inst.id, effVal)}`,
+            colorClass: tMeta.colorClass,
+          });
+        }
+
         return (
           <div
             key={idx}
-            className={`relative overflow-hidden bg-[#171a29] border ${mercTheme.cardBorderClass} rounded-lg p-2.5 pl-3 space-y-1.5 transition-colors`}
+            className={`relative overflow-hidden bg-[#171a29] border ${mercTheme.cardBorderClass} rounded-xl p-3.5 pl-4 space-y-2.5 transition-colors`}
             style={{ backgroundImage: mercTheme.radialBgStyle }}
           >
-            {/* Left Archetype Signature Accent Line */}
-            <div className={`absolute inset-y-1.5 left-0 w-[3px] rounded-r ${mercTheme.accentBarClass}`} />
+            {/* Left Archetype Accent Bar */}
+            <div className={`absolute inset-y-2 left-0 w-[3.5px] rounded-r ${mercTheme.accentBarClass}`} />
 
-            {/* Top Row: [Icon + Name + Lv + Next Slot Node] + [Upgrade +N] */}
-            <div className="flex items-center justify-between gap-2">
-              <button
-                type="button"
-                onClick={() => onOpenForgeModal(idx)}
-                className="min-w-0 flex-1 flex items-center justify-between gap-2 text-left rounded p-1 -m-1 hover:bg-white/5 transition-colors cursor-pointer"
-                title="点击打开千级道纹与本命神通洗练"
-              >
-                <div className="flex items-baseline gap-1.5 min-w-0">
+            {/* Top Row: Identity + DPS + Big Upgrade Action */}
+            <div className="flex items-center justify-between gap-2.5">
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex items-baseline gap-1.5 flex-wrap">
                   <ArchetypeIcon archetype={slot.archetype} className="w-5 h-5 self-center shrink-0" />
-                  <span className={`text-sm truncate ${mercTheme.nameClass}`}>
+                  <span className={`text-[15px] truncate ${mercTheme.nameClass}`}>
                     {arch.name}
                   </span>
-                  <span className={`font-mono-num text-xs font-bold shrink-0 ${mercTheme.levelClass}`}>
+                  <span className={`font-mono-num text-[13px] font-bold shrink-0 ${mercTheme.levelClass}`}>
                     Lv.{slot.level}
-                    {effLv > slot.level ? `(${effLv})` : ''}
+                    {effLv > slot.level ? ` (${effLv})` : ''}
                   </span>
                 </div>
 
-                <div className="flex items-center gap-1.5 shrink-0 font-mono-num text-[11px]">
-                  <span className="text-[#94a3b8] hidden sm:inline text-[10px]">
-                    {nextThreshold ? `下槽:${nextThreshold}` : '十槽圆满'}
-                  </span>
+                <div className="flex items-center gap-2 text-xs font-mono-num">
                   <span className="font-bold text-[#e2e8f0]">
                     {formatNumber(computed.dpsEstimate, settings.numberMode, true)}/s
                   </span>
+                  <span className="text-[#64748b]">·</span>
+                  <span className="text-[#fde047] font-display font-bold truncate">
+                    ★ {innateCfg.name}
+                  </span>
                 </div>
-              </button>
+              </div>
 
               <button
                 type="button"
                 onClick={() => upgradeMercenary(idx)}
                 disabled={!canUpgrade}
-                className={`min-w-[92px] px-2 py-1 rounded-md text-xs font-medium text-right shrink-0 transition-colors cursor-pointer ${
+                className={`min-h-[48px] min-w-[112px] px-3 py-2 rounded-lg text-[13px] font-medium text-right shrink-0 transition-colors cursor-pointer flex flex-col justify-center ${
                   canUpgrade
                     ? 'bg-[#06b6d4]/22 border border-[#22d3ee]/55 text-[#ecfeff] hover:bg-[#06b6d4]/35'
                     : 'bg-[#1e2235] border border-[#2e3552] text-[#64748b] cursor-not-allowed'
                 }`}
               >
-                <div className="font-semibold leading-tight">升级 +{bulk.count}</div>
-                <div className="font-mono-num text-[10px] opacity-90">
+                <div className="font-bold leading-tight">升级 +{bulk.count}</div>
+                <div className="font-mono-num text-[11px] opacity-90 mt-0.5">
                   {formatNumber(bulk.totalCost, settings.numberMode)} 灵石
                 </div>
               </button>
             </div>
 
-            {/* Middle 1-line Talents + Gold Innate Badge */}
-            <button
-              type="button"
-              onClick={() => onOpenForgeModal(idx)}
-              className="w-full text-left flex items-center justify-between gap-1.5 text-[10.5px] px-1 py-0.5 rounded hover:bg-white/5 transition-colors cursor-pointer"
-            >
-              <span className="text-[#94a3b8] truncate">
-                天赋：{arch.talent1Name} · {arch.talent2Name}
-              </span>
-              <span className="text-[#fde047] font-display font-bold text-glow-gold shrink-0 whitespace-nowrap">
-                ★ {innateCfg.name}
-              </span>
-            </button>
-
-            {/* Bottom 2x5 Grid for 10 Level Affix Slots (Lv.10 ~ Lv.1000) */}
-            <button
-              type="button"
-              onClick={() => onOpenForgeModal(idx)}
-              className="w-full text-left cursor-pointer group"
-              title="点击管理 10 重道纹与本命神通"
-            >
-              <div className="grid grid-cols-5 gap-1">
+            {/* 10-Node Rune Progress Bar */}
+            <div className="space-y-1.5">
+              <div className="grid grid-cols-10 gap-1">
                 {LEVEL_SLOT_THRESHOLDS.map((reqLv, sIdx) => {
                   const permanentlyOpen = sIdx < slot.unlockedLevelSlots;
                   const activeNow = effLv >= reqLv;
                   const inst = slot.levelAffixes[sIdx];
-
-                  if (!permanentlyOpen) {
-                    return (
-                      <div
-                        key={sIdx}
-                        className="px-1 py-0.5 rounded border border-white/8 bg-[#101322] text-[9px] font-mono-num text-[#64748b] flex items-center justify-center gap-0.5 truncate"
-                      >
-                        <Lock className="w-2.5 h-2.5 shrink-0 opacity-65" />
-                        <span>{reqLv}</span>
-                      </div>
-                    );
-                  }
-
-                  if (!inst) {
-                    return (
-                      <div
-                        key={sIdx}
-                        className={`px-1 py-0.5 rounded border border-dashed text-[9px] text-center truncate ${
-                          activeNow
-                            ? 'border-[#38bdf8]/45 text-[#7dd3fc] bg-[#0d101b]'
-                            : 'border-white/12 text-[#64748b] bg-[#101322] opacity-65'
-                        }`}
-                      >
-                        {activeNow ? '可洗练' : `Lv.${reqLv}`}
-                      </div>
-                    );
-                  }
-
-                  const tMeta = AFFIX_TIER_META[inst.tier];
-                  const cfg = AFFIXES[inst.id];
-                  const effVal = getAffixEffectiveValue(
-                    inst,
-                    sIdx,
-                    s5,
-                    hasInnateBoost,
-                    firstAffixRelicLv
-                  );
-                  const valStr = formatAffixShortBadgeValue(inst.id, effVal);
-
+                  const tMeta = inst ? AFFIX_TIER_META[inst.tier] : null;
+                  const barColor = !permanentlyOpen
+                    ? 'bg-white/10'
+                    : !activeNow
+                      ? 'bg-[#334155]'
+                      : tMeta
+                        ? inst?.tier === 'gold'
+                          ? 'bg-[#fbbf24]'
+                          : inst?.tier === 'purple'
+                            ? 'bg-[#c084fc]'
+                            : inst?.tier === 'blue'
+                              ? 'bg-[#38bdf8]'
+                              : inst?.tier === 'green'
+                                ? 'bg-[#34d399]'
+                                : 'bg-[#cbd5e1]'
+                        : 'bg-[#38bdf8]/45';
                   return (
                     <div
                       key={sIdx}
-                      className={`px-1 py-0.5 rounded border text-[9px] truncate flex items-center justify-between gap-0.5 ${
-                        activeNow
-                          ? `${tMeta.badgeBgClass} ${tMeta.borderClass} ${tMeta.colorClass}`
-                          : 'bg-[#101322] border-white/10 text-[#64748b] opacity-55'
-                      }`}
-                    >
-                      <span className="truncate">{cfg.name}</span>
-                      <span className="font-mono-num shrink-0">
-                        {activeNow ? valStr : `Lv.${reqLv}`}
-                      </span>
-                    </div>
+                      className={`h-2 rounded-sm ${barColor}`}
+                      title={`Lv.${reqLv}`}
+                    />
                   );
                 })}
               </div>
 
-              <div className="flex items-center justify-between mt-1 text-[9px] text-[#64748b] group-hover:text-[#94a3b8]">
-                <span>
-                  点击开启道纹洗练 · {nextThreshold ? `距下槽还差 ${nextThreshold - effLv} 有效级` : '十槽已全开'}
+              {activeSummaries.length > 0 && (
+                <div className="flex items-center gap-x-2.5 gap-y-0.5 flex-wrap text-xs">
+                  {activeSummaries.slice(0, 3).map((item, i) => (
+                    <span key={i} className={`font-semibold ${item.colorClass}`}>
+                      {item.text}
+                    </span>
+                  ))}
+                  {activeSummaries.length > 3 && (
+                    <span className="text-[#94a3b8]">+{activeSummaries.length - 3}项</span>
+                  )}
+                </div>
+              )}
+            </div>
+
+            {/* Dedicated 44px+ Forge Trigger Bar */}
+            <button
+              type="button"
+              onClick={() => onOpenForgeModal(idx)}
+              className={`w-full min-h-[44px] px-3 py-2 rounded-lg border flex items-center justify-between gap-2 text-xs font-semibold transition-colors cursor-pointer ${
+                hasPending
+                  ? 'bg-[#f59e0b]/18 border-[#fbbf24]/65 text-[#fef08a]'
+                  : 'bg-[#101322] border-[#2e3552] text-[#cbd5e1] hover:border-[#38bdf8]/55 hover:text-white'
+              }`}
+            >
+              <span className="inline-flex items-center gap-1.5 truncate">
+                <SlidersHorizontal className="w-3.5 h-3.5 text-[#38bdf8] shrink-0" />
+                <span className="truncate">
+                  {hasPending
+                    ? '有待确认的洗练对比结果'
+                    : `道纹洗练 (${slot.unlockedLevelSlots}/10槽${nextThreshold ? ` · 下槽 Lv.${nextThreshold}` : ''})`}
                 </span>
-                <span className="inline-flex items-center gap-0.5">
-                  {hasPending && <span className="text-[#fbbf24] mr-1">有待定结果</span>}
-                  <SlidersHorizontal className="w-2.5 h-2.5" />
-                </span>
-              </div>
+              </span>
+              <span className="text-[#7dd3fc] shrink-0 whitespace-nowrap">管理与洗练 →</span>
             </button>
           </div>
         );

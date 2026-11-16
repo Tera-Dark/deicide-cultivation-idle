@@ -117,9 +117,29 @@ const HIGHLIGHT_RULES: HighlightRule[] = [
       'font-semibold text-[#34d399] text-glow-emerald mx-[1px]',
   },
   {
-    tokens: ['五大本命护法', '道纹洗练面板', '遗物圣殿', '古神遗物', '神阶·古神遗物', '神阶遗物', '仙阶遗物'],
+    tokens: ['神阶·古神遗物', '神阶遗物', '神阶'],
     className:
-      'font-display font-bold text-[#fde68a] text-glow-gold mx-[1px]',
+      'font-display font-bold text-[#fb7185] text-glow-crimson mx-[1px]',
+  },
+  {
+    tokens: ['五大本命护法', '道纹洗练面板', '遗物圣殿', '古神遗物', '仙阶遗物', '仙阶'],
+    className:
+      'font-display font-bold text-[#fbbf24] text-glow-gold mx-[1px]',
+  },
+  {
+    tokens: ['圣阶遗物', '圣阶'],
+    className:
+      'font-display font-bold text-[#c084fc] text-glow-purple mx-[1px]',
+  },
+  {
+    tokens: ['玄阶遗物', '玄阶'],
+    className:
+      'font-display font-bold text-[#38bdf8] text-glow-sky mx-[1px]',
+  },
+  {
+    tokens: ['灵阶遗物', '灵阶'],
+    className:
+      'font-display font-bold text-[#34d399] text-glow-emerald mx-[1px]',
   },
   {
     tokens: [
@@ -174,10 +194,7 @@ const TOKEN_PATTERN = ALL_TOKENS.map(escapeRegex).join('|');
 const NUMERIC_CALLOUT_PATTERN =
   '(?:×\\s*\\d+(?:\\.\\d+)?\\s*倍?|Lv\\.\\s*\\d+\\+?|\\d+(?:\\.\\d+)?\\s*(?:级|重|层|秒|次|颗|石|晶)|1e\\d+|\\d+(?:\\.\\d+)?%)';
 
-const COMBINED_REGEX = new RegExp(
-  `【([^】]+)】|(${TOKEN_PATTERN})|(${NUMERIC_CALLOUT_PATTERN})`,
-  'g'
-);
+const COMBINED_PATTERN = `【([^】]+)】|(${TOKEN_PATTERN})|(${NUMERIC_CALLOUT_PATTERN})`;
 
 /**
  * Renders lore, tutorials, guides, and skill descriptions with semantic color luminescence
@@ -190,15 +207,22 @@ export function RichLoreText({
   text: string;
   className?: string;
 }) {
+  if (typeof text !== 'string' || !text) {
+    return null;
+  }
+
   const nodes: ReactNode[] = [];
   let lastIndex = 0;
   let keyCounter = 0;
-
-  // Reset stateful global regex
-  COMBINED_REGEX.lastIndex = 0;
+  const regex = new RegExp(COMBINED_PATTERN, 'g');
   let match: RegExpExecArray | null;
 
-  while ((match = COMBINED_REGEX.exec(text)) !== null) {
+  while ((match = regex.exec(text)) !== null) {
+    if (match[0].length === 0) {
+      regex.lastIndex += 1;
+      continue;
+    }
+
     if (match.index > lastIndex) {
       nodes.push(text.slice(lastIndex, match.index));
     }
@@ -244,7 +268,7 @@ export function RichLoreText({
       );
     }
 
-    lastIndex = COMBINED_REGEX.lastIndex;
+    lastIndex = regex.lastIndex;
   }
 
   if (lastIndex < text.length) {

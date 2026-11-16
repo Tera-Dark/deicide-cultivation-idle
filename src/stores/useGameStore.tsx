@@ -1,12 +1,15 @@
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import Decimal from 'break_infinity.js';
 import {
+  AFFIXES,
+  AFFIX_TIER_META,
+  INNATE_AFFIXES,
   rollAffixTier,
   rollRandomAffixId,
   rollRandomInnateAffix,
 } from '../config/affixes';
 import { ARCHETYPES } from '../config/archetypes';
-import { BOSS_SHELLS, TRIBULATIONS } from '../config/bosses';
+import { BOSS_SHELLS, TRIBULATION_MAP, TRIBULATIONS } from '../config/bosses';
 import {
   BASE_START_MANA,
   ENLIGHTENMENT_BASE_COST,
@@ -19,7 +22,7 @@ import {
   REALM_TIERS,
   SKILLS,
 } from '../config/constants';
-import { RELICS, RELIC_MAP } from '../config/relics';
+import { RELICS, RELIC_MAP, RELIC_TIER_META, getRelicLevelsBreakdown } from '../config/relics';
 import {
   evaluateSpeedrunRank,
   getCostReductionMult,
@@ -30,9 +33,11 @@ import {
   getHeroStats,
   getMercCheapDiscount,
   getMercenaryComputedStats,
+  getNextTribulationUnlockState,
   getPhaseMaxHp,
   getPoisonTickExpectedDamage,
   getRealmInfo,
+  getRelicTotalLv,
   getSkillEffectiveValues,
   getSpiritStoneMultiplier,
   getTribulationConfig,
@@ -60,6 +65,8 @@ import type {
   SkillId,
   TribulationId,
   TutorialNodeId,
+  VictoryOverflowDropItem,
+  VictoryRelicDropItem,
   VictorySummary,
 } from '../types/game';
 import { soundEngine } from '../utils/audio';
@@ -95,12 +102,16 @@ function decodeBase64Utf8(b64: string): string {
 
 export function createInitialMetaState(): MetaState {
   const relicLevels = {} as Record<RelicId, number>;
+  const relicDropLevels = {} as Record<RelicId, number>;
   for (const r of RELICS) {
     relicLevels[r.id] = 0;
+    relicDropLevels[r.id] = 0;
   }
   const clearedTribulations = {} as Record<TribulationId, boolean>;
+  const clearCounts = {} as Record<TribulationId, number>;
   for (const t of TRIBULATIONS) {
     clearedTribulations[t.id] = false;
+    clearCounts[t.id] = 0;
   }
   return {
     affixStones: 0,
@@ -121,8 +132,10 @@ export function createInitialMetaState(): MetaState {
       tut_tier1_win: false,
     },
     clearedTribulations,
+    clearCounts,
     ngPlusCount: 0,
     relicLevels,
+    relicDropLevels,
     rerollPity: 0,
     highestUnlockedOrder: 1,
     bestClearTimesMs: {},
@@ -172,15 +185,26 @@ export function createInitialRunState(
   prevSkillAutoCast?: Partial<Record<SkillId, boolean>>
 ): RunState {
   const phase0Max = getPhaseMaxHp(tribulationId, 0, meta);
-  const startGoldLv = meta.relicLevels.rel_c_start_gold ?? 0;
+  const startGoldCrystalLv = meta.relicLevels.rel_c_start_gold ?? 0;
+  const startGoldDropLv = meta.relicDropLevels?.rel_c_start_gold ?? 0;
   const startStones =
-    startGoldLv > 0 ? new Decimal(500).mul(Decimal.pow(5, startGoldLv)) : new Decimal(0);
+    startGoldCrystalLv + startGoldDropLv > 0
+      ? new Decimal(500)
+          .mul(Decimal.pow(3, startGoldCrystalLv))
+          .mul(1 + 0.5 * startGoldDropLv)
+      : new Decimal(0);
 
-  const hourglassLv = meta.relicLevels.rel_e_auto_start ?? 0;
+  const hourglassCrystalLv = meta.relicLevels.rel_e_auto_start ?? 0;
+  const hourglassDropLv = meta.relicDropLevels?.rel_e_auto_start ?? 0;
+  const hourglassTotalLv = hourglassCrystalLv + hourglassDropLv;
   const startAccumulated =
-    hourglassLv > 0 ? new Decimal(1000).mul(Decimal.pow(2, hourglassLv)) : new Decimal(0);
+    hourglassTotalLv > 0
+      ? new Decimal(1000)
+          .mul(Decimal.pow(2, hourglassCrystalLv))
+          .mul(1 + 0.5 * hourglassDropLv)
+      : new Decimal(0);
   const freePuppetLv =
-    hourglassLv > 0 ? Math.min(PUPPET_MAX_LEVEL, 5 * hourglassLv) : 0;
+    hourglassTotalLv > 0 ? Math.min(PUPPET_MAX_LEVEL, 5 * hourglassTotalLv) : 0;
 
   return {
     tribulationId,
@@ -246,6 +270,176 @@ function normalizeTenSlots<T>(arr: unknown, fallbackValue: T): T[] {
   return res;
 }
 
+function safeInt(val: unknown, fallback: number, min = 0, max = Number.MAX_SAFE_INTEGER): number {
+  const n = typeof val === 'number' ? val : Number(val);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, Math.floor(n)));
+}
+
+function safeFloat(val: unknown, fallback: number, min = 0, max = Number.MAX_SAFE_INTEGER): number {
+  const n = typeof val === 'number' ? val : Number(val);
+  if (!Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function safeDecimalStr(val: unknown, fallback = '0'): string {
+  if (val === null || val === undefined) return fallback;
+  try {
+    const d = new Decimal(val as string | number);
+    if (!Number.isFinite(d.mantissa) || Number.isNaN(d.mantissa)) return fallback;
+    return d.lt(0) ? fallback : d.toString();
+  } catch {
+    return fallback;
+  }
+}
+
+function sanitizeAffixInstance(raw: unknown): AffixInstance | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as { id?: unknown; tier?: unknown };
+  if (typeof obj.id !== 'string' || !(obj.id in AFFIXES)) return null;
+  if (typeof obj.tier !== 'string' || !(obj.tier in AFFIX_TIER_META)) return null;
+  return {
+    id: obj.id as AffixInstance['id'],
+    tier: obj.tier as AffixInstance['tier'],
+  };
+}
+
+function sanitizeMetaState(raw: Partial<MetaState> | undefined, defaultMeta: MetaState): MetaState {
+  const src = raw ?? {};
+  const relicLevels = { ...defaultMeta.relicLevels };
+  if (src.relicLevels && typeof src.relicLevels === 'object') {
+    for (const r of RELICS) {
+      const lv = safeInt((src.relicLevels as Record<string, unknown>)[r.id], 0, 0, 100000);
+      relicLevels[r.id] = r.maxLevel !== null ? Math.min(r.maxLevel, lv) : lv;
+    }
+  }
+
+  const relicDropLevels = { ...defaultMeta.relicDropLevels };
+  if (src.relicDropLevels && typeof src.relicDropLevels === 'object') {
+    for (const r of RELICS) {
+      const dlv = safeInt((src.relicDropLevels as Record<string, unknown>)[r.id], 0, 0, 1000000);
+      relicDropLevels[r.id] = r.maxDropLevel !== null ? Math.min(r.maxDropLevel, dlv) : dlv;
+    }
+  }
+
+  const clearedTribulations = { ...defaultMeta.clearedTribulations };
+  const clearCounts = { ...defaultMeta.clearCounts };
+  const bestClearTimesMs: Partial<Record<TribulationId, number>> = {};
+  const sssUnlockedAutoRepeat: Partial<Record<TribulationId, boolean>> = {};
+  for (const t of TRIBULATIONS) {
+    clearedTribulations[t.id] = Boolean(src.clearedTribulations?.[t.id]);
+    const rawCount = (src.clearCounts as Record<string, unknown> | undefined)?.[t.id];
+    clearCounts[t.id] = safeInt(rawCount, clearedTribulations[t.id] ? 1 : 0, 0);
+    const rawBest = src.bestClearTimesMs?.[t.id];
+    if (typeof rawBest === 'number' && Number.isFinite(rawBest) && rawBest > 0) {
+      bestClearTimesMs[t.id] = rawBest;
+    }
+    if (src.sssUnlockedAutoRepeat?.[t.id]) {
+      sssUnlockedAutoRepeat[t.id] = true;
+    }
+  }
+
+  const highestUnlockedOrder = safeInt(src.highestUnlockedOrder, 1, 1, TRIBULATIONS.length);
+  for (let i = 0; i < TRIBULATIONS.length - 1; i++) {
+    const cur = TRIBULATIONS[i];
+    const next = TRIBULATIONS[i + 1];
+    if (next.order <= highestUnlockedOrder) {
+      clearCounts[cur.id] = Math.max(clearCounts[cur.id], next.unlockReqPrevClears);
+    }
+  }
+
+  return {
+    affixStones: safeInt(src.affixStones, 0, 0),
+    divineCrystals: safeDecimalStr(src.divineCrystals, '0'),
+    hasUnlockedPuppet: Boolean(src.hasUnlockedPuppet),
+    firstBreakGiftsClaimed: safeInt(src.firstBreakGiftsClaimed, 0, 0, 10),
+    unlockedBulkBuy: Boolean(src.unlockedBulkBuy),
+    unlockedRelicHall: Boolean(src.unlockedRelicHall),
+    unlockedAffixLock: Boolean(src.unlockedAffixLock),
+    unlockedInnateReroll: Boolean(src.unlockedInnateReroll),
+    unlockedEpicPool: Boolean(src.unlockedEpicPool),
+    unlockedAutoSkill: Boolean(src.unlockedAutoSkill),
+    hasSeenIntro: Boolean(src.hasSeenIntro),
+    shownTutorials: {
+      ...defaultMeta.shownTutorials,
+      ...(src.shownTutorials ?? {}),
+    },
+    clearedTribulations,
+    clearCounts,
+    ngPlusCount: safeInt(src.ngPlusCount, 0, 0, 100000),
+    relicLevels,
+    relicDropLevels,
+    rerollPity: safeInt(src.rerollPity, 0, 0, 9),
+    highestUnlockedOrder,
+    bestClearTimesMs,
+    sssUnlockedAutoRepeat,
+    autoRepeatEnabled: Boolean(src.autoRepeatEnabled),
+    totalSlays: safeInt(src.totalSlays, 0, 0),
+    totalRestarts: safeInt(src.totalRestarts, 0, 0),
+    totalPlayTimeMs: safeFloat(src.totalPlayTimeMs, 0, 0),
+    totalClicks: safeDecimalStr(src.totalClicks, '0'),
+    highestDps: safeDecimalStr(src.highestDps, '0'),
+    totalRerolls: safeInt(src.totalRerolls, 0, 0),
+  };
+}
+
+function sanitizeMercsState(raw: unknown, defaultMercs: MercenarySlotState[]): MercenarySlotState[] {
+  if (!Array.isArray(raw) || raw.length !== 5) return defaultMercs;
+  return raw.map((item, idx) => {
+    const def = defaultMercs[idx];
+    const m = (item && typeof item === 'object' ? item : {}) as Partial<MercenarySlotState>;
+    const archetype = FIXED_SLOT_ARCHETYPES[idx];
+    const validInnate =
+      typeof m.innateAffix === 'string' && m.innateAffix in INNATE_AFFIXES
+        ? m.innateAffix
+        : ARCHETYPES[archetype].recommendedInnate;
+    const validPendingInnate =
+      typeof m.pendingInnateAffix === 'string' && m.pendingInnateAffix in INNATE_AFFIXES
+        ? m.pendingInnateAffix
+        : null;
+
+    const rawSlots = normalizeTenSlots<unknown>(m.levelAffixes, null);
+    const levelAffixes = rawSlots.map(sanitizeAffixInstance);
+    const lockedLevelSlots = normalizeTenSlots<unknown>(m.lockedLevelSlots, false).map(Boolean);
+
+    let pendingLevelAffixes: MercenarySlotState['pendingLevelAffixes'] = null;
+    if (
+      m.pendingLevelAffixes &&
+      typeof m.pendingLevelAffixes === 'object' &&
+      Array.isArray(m.pendingLevelAffixes.indices) &&
+      Array.isArray(m.pendingLevelAffixes.candidates)
+    ) {
+      const validIndices = m.pendingLevelAffixes.indices.filter(
+        (i): i is number => typeof i === 'number' && i >= 0 && i < 10
+      );
+      if (validIndices.length > 0) {
+        pendingLevelAffixes = {
+          indices: validIndices,
+          candidates: normalizeTenSlots<unknown>(m.pendingLevelAffixes.candidates, null).map(
+            sanitizeAffixInstance
+          ),
+        };
+      }
+    }
+
+    return {
+      ...def,
+      slotIndex: idx,
+      unlocked: Boolean(m.unlocked),
+      archetype,
+      level: safeInt(m.level, 1, 1, 1000000),
+      innateAffix: validInnate,
+      pendingInnateAffix: validPendingInnate,
+      unlockedLevelSlots: safeInt(m.unlockedLevelSlots, 0, 0, 10),
+      levelAffixes,
+      lockedLevelSlots,
+      pendingLevelAffixes,
+      attackTimer: safeFloat(m.attackTimer, 0, 0, 60),
+      attackCount: safeInt(m.attackCount, 0, 0),
+    };
+  });
+}
+
 function loadSavedState(): {
   run: RunState;
   mercs: MercenarySlotState[];
@@ -274,43 +468,19 @@ function loadSavedState(): {
       };
     }
     const parsed = JSON.parse(raw) as Partial<GameSaveData>;
-    const meta: MetaState = {
-      ...defaultMeta,
-      ...(parsed.meta ?? {}),
-      totalPlayTimeMs: Number(parsed.meta?.totalPlayTimeMs ?? 0) || 0,
-      totalClicks: parsed.meta?.totalClicks ?? '0',
-      highestDps: parsed.meta?.highestDps ?? '0',
-      totalRerolls: Number(parsed.meta?.totalRerolls ?? 0) || 0,
-      shownTutorials: {
-        ...defaultMeta.shownTutorials,
-        ...(parsed.meta?.shownTutorials ?? {}),
-      },
-      relicLevels: { ...defaultMeta.relicLevels, ...(parsed.meta?.relicLevels ?? {}) },
-      clearedTribulations: {
-        ...defaultMeta.clearedTribulations,
-        ...(parsed.meta?.clearedTribulations ?? {}),
-      },
-      bestClearTimesMs: { ...(parsed.meta?.bestClearTimesMs ?? {}) },
-      sssUnlockedAutoRepeat: { ...(parsed.meta?.sssUnlockedAutoRepeat ?? {}) },
-    };
-
-    const mercs: MercenarySlotState[] =
-      Array.isArray(parsed.mercs) && parsed.mercs.length === 5
-        ? parsed.mercs.map((m, idx) => ({
-            ...defaultMercs[idx],
-            ...m,
-            slotIndex: idx,
-            archetype: FIXED_SLOT_ARCHETYPES[idx],
-            levelAffixes: normalizeTenSlots<AffixInstance | null>(m.levelAffixes, null),
-            lockedLevelSlots: normalizeTenSlots<boolean>(m.lockedLevelSlots, false),
-            attackCount: Number(m.attackCount ?? 0) || 0,
-          }))
-        : defaultMercs;
+    const meta = sanitizeMetaState(parsed.meta, defaultMeta);
+    const mercs = sanitizeMercsState(parsed.mercs, defaultMercs);
 
     const rawFloatMode = parsed.settings?.floatingTextMode;
     const settings: SettingsState = {
       ...defaultSettings,
       ...(parsed.settings ?? {}),
+      numberMode: parsed.settings?.numberMode === 'scientific' ? 'scientific' : 'chinese',
+      soundEnabled: typeof parsed.settings?.soundEnabled === 'boolean' ? parsed.settings.soundEnabled : true,
+      buyMode:
+        parsed.settings?.buyMode === 10 || parsed.settings?.buyMode === 'MAX'
+          ? parsed.settings.buyMode
+          : 1,
       floatingTextMode:
         rawFloatMode === 'all' || rawFloatMode === 'crit' || rawFloatMode === 'off'
           ? rawFloatMode
@@ -325,7 +495,13 @@ function loadSavedState(): {
           : true,
     };
 
-    const baseRun = createInitialRunState(parsed.run?.tribulationId ?? 'tier_1', meta);
+    const rawTribId = parsed.run?.tribulationId;
+    const tribId: TribulationId =
+      typeof rawTribId === 'string' && rawTribId in TRIBULATION_MAP
+        ? (rawTribId as TribulationId)
+        : 'tier_1';
+
+    const baseRun = createInitialRunState(tribId, meta);
     if (parsed.run?.runCompleted) {
       return {
         run: baseRun,
@@ -339,10 +515,23 @@ function loadSavedState(): {
     const run: RunState = {
       ...baseRun,
       ...(parsed.run ?? {}),
-      phaseIndex: Math.max(
-        0,
-        Math.min(BOSS_SHELLS.length - 1, Number(parsed.run?.phaseIndex ?? 0) || 0)
-      ),
+      tribulationId: tribId,
+      phaseIndex: safeInt(parsed.run?.phaseIndex, 0, 0, BOSS_SHELLS.length - 1),
+      bossHp: safeDecimalStr(parsed.run?.bossHp, baseRun.bossHp),
+      bossMaxHp: safeDecimalStr(parsed.run?.bossMaxHp, baseRun.bossMaxHp),
+      poisonStacks: safeInt(parsed.run?.poisonStacks, 0, 0, 1e12),
+      spiritStones: safeDecimalStr(parsed.run?.spiritStones, baseRun.spiritStones),
+      mana: safeFloat(parsed.run?.mana, baseRun.mana, 0, 100000),
+      clickStacks: safeDecimalStr(parsed.run?.clickStacks, '0'),
+      manualClicks: safeInt(parsed.run?.manualClicks, 0, 0),
+      swordAndHeroAttacksForCannon: safeInt(parsed.run?.swordAndHeroAttacksForCannon, 0, 0, 1000),
+      enlightenmentLevel: safeInt(parsed.run?.enlightenmentLevel, 1, 1, 1000000),
+      accumulatedAtk: safeDecimalStr(parsed.run?.accumulatedAtk, baseRun.accumulatedAtk),
+      sharedHeroGrowth: safeDecimalStr(parsed.run?.sharedHeroGrowth, '0'),
+      realmLevel: safeInt(parsed.run?.realmLevel, 0, 0, 10000),
+      puppetLevel: safeInt(parsed.run?.puppetLevel, baseRun.puppetLevel, 0, PUPPET_MAX_LEVEL),
+      elapsedMs: safeFloat(parsed.run?.elapsedMs, 0, 0),
+      runCompleted: false,
       skills: {
         sk_blood: { ...baseRun.skills.sk_blood, ...(parsed.run?.skills?.sk_blood ?? {}) },
         sk_clone: { ...baseRun.skills.sk_clone, ...(parsed.run?.skills?.sk_clone ?? {}) },
@@ -350,14 +539,26 @@ function loadSavedState(): {
         sk_sync: { ...baseRun.skills.sk_sync, ...(parsed.run?.skills?.sk_sync ?? {}) },
       },
       heroBuffStacks: Array.isArray(parsed.run?.heroBuffStacks)
-        ? parsed.run.heroBuffStacks.filter((b) => typeof b?.val === 'number' && typeof b?.expiresAt === 'number')
+        ? parsed.run.heroBuffStacks.filter(
+            (b) =>
+              typeof b?.val === 'number' &&
+              Number.isFinite(b.val) &&
+              typeof b?.expiresAt === 'number' &&
+              Number.isFinite(b.expiresAt)
+          )
         : [],
       recentTickDps: {
-        hero: parsed.run?.recentTickDps?.hero ?? baseRun.recentTickDps.hero,
-        poison: parsed.run?.recentTickDps?.poison ?? baseRun.recentTickDps.poison,
+        hero: safeDecimalStr(parsed.run?.recentTickDps?.hero, baseRun.recentTickDps.hero),
+        poison: safeDecimalStr(parsed.run?.recentTickDps?.poison, baseRun.recentTickDps.poison),
         mercs:
           Array.isArray(rawMercDps) && rawMercDps.length === 5
-            ? (rawMercDps as [string, string, string, string, string])
+            ? (rawMercDps.map((v) => safeDecimalStr(v, '0')) as [
+                string,
+                string,
+                string,
+                string,
+                string,
+              ])
             : baseRun.recentTickDps.mercs,
       },
     };
@@ -371,13 +572,6 @@ function loadSavedState(): {
       settings: defaultSettings,
     };
   }
-}
-
-export function getRelicPullCost(meta: MetaState): number {
-  const ownedStandard = RELICS.filter(
-    (r) => r.tier !== 'mythic' && (meta.relicLevels[r.id] ?? 0) > 0
-  ).length;
-  return Math.floor(10 * Math.pow(1.35, ownedStandard));
 }
 
 export function getRelicUpgradeCost(relicId: RelicId, currentLevel: number): Decimal {
@@ -425,7 +619,6 @@ interface GameContextValue {
   rerollMercInnate: (slotIndex: number) => void;
   confirmPendingInnateAffix: (slotIndex: number, accept: boolean) => void;
 
-  pullRandomRelic: () => void;
   upgradeRelic: (relicId: RelicId) => void;
 
   switchTribulation: (tribId: TribulationId) => void;
@@ -495,6 +688,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const toastTimerRef = useRef<number | null>(null);
   const lastMetaUiSyncRef = useRef<number>(Date.now());
   const isHardResettingRef = useRef(false);
+  const autoRepeatCountdownRef = useRef<number | null>(null);
+  const victoryTriggeredRef = useRef(false);
 
   useEffect(() => {
     soundEngine.setEnabled(settings.soundEnabled);
@@ -618,7 +813,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       let shellsBroken = 0;
       let hp = toDecimal(nextRun.bossHp);
       let phase = nextRun.phaseIndex;
-      const firstAffixRelicLv = nextMeta.relicLevels.rel_m_first_affix ?? 0;
+      const firstAffixRelicLv = getRelicTotalLv(nextMeta, 'rel_m_first_affix');
 
       let safety = 0;
       while (remaining.gt(0) && phase < BOSS_SHELLS.length && safety < 12) {
@@ -634,7 +829,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           const shellCfg = BOSS_SHELLS[phase];
 
           // Base Affix Stones + overflow guaranteed bonus from af_t2_stone_p + rel_r_essence
-          const essenceRelicLv = nextMeta.relicLevels.rel_r_essence ?? 0;
+          const essenceRelicLv = getRelicTotalLv(nextMeta, 'rel_r_essence');
           const stoneAffixRatio = sumAllActiveAffixRatio(
             nextMercs,
             'af_t2_stone_p',
@@ -647,9 +842,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
             (Math.random() < (extraPct % 100) / 100 ? 1 : 0);
 
           // rel_e_boss_skip (Phase 1~8)
-          const skipLv = nextMeta.relicLevels.rel_e_boss_skip ?? 0;
+          const skipLv = getRelicTotalLv(nextMeta, 'rel_e_boss_skip');
           let skippedExtra = false;
-          if (phase <= 7 && skipLv > 0 && Math.random() < 0.025 * skipLv) {
+          if (phase <= 7 && skipLv > 0 && Math.random() < Math.min(0.75, 0.025 * skipLv)) {
             skippedExtra = true;
             stonesGain *= 2;
           }
@@ -797,46 +992,61 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   const handleVictory = useCallback(
     (completedRun: RunState, currentMeta: MetaState) => {
+      if (victoryTriggeredRef.current) return;
+      victoryTriggeredRef.current = true;
+
+      if (squashTimerRef.current) {
+        window.clearTimeout(squashTimerRef.current);
+        squashTimerRef.current = null;
+      }
+      if (shakeTimerRef.current) {
+        window.clearTimeout(shakeTimerRef.current);
+        shakeTimerRef.current = null;
+      }
+      setIsHitSquashed(false);
+      setIsArenaShaking(false);
+      setHitOffset({ x: 0, y: 0 });
+      setClickRipples([]);
+
       const m: MetaState = {
         ...currentMeta,
         shownTutorials: { ...currentMeta.shownTutorials },
         relicLevels: { ...currentMeta.relicLevels },
+        relicDropLevels: { ...(currentMeta.relicDropLevels ?? {}) },
         clearedTribulations: { ...currentMeta.clearedTribulations },
+        clearCounts: { ...currentMeta.clearCounts },
         bestClearTimesMs: { ...currentMeta.bestClearTimesMs },
         sssUnlockedAutoRepeat: { ...currentMeta.sssUnlockedAutoRepeat },
       };
 
       const trib = getTribulationConfig(completedRun.tribulationId);
-      const clearTimeMs = Math.max(100, completedRun.elapsedMs);
+      const clearTimeMs = Number.isFinite(completedRun.elapsedMs)
+        ? Math.max(100, completedRun.elapsedMs)
+        : 100;
       const {
         rank,
         crystalMult,
-        bonusRelicLevels: speedBonusLv,
+        bonusRelicLevels: speedBonusDrops,
       } = evaluateSpeedrunRank(clearTimeMs, trib.order);
 
-      const infCrystalLv = m.relicLevels.rel_e_inf_crystal ?? 0;
+      const infCrystalLv = getRelicTotalLv(m, 'rel_e_inf_crystal');
       const ngMult =
         trib.id === 'tier_10' && m.ngPlusCount > 0 ? Decimal.pow(2, m.ngPlusCount) : new Decimal(1);
 
       const crystalsEarned = new Decimal(trib.baseCrystalReward)
         .mul(ngMult)
         .mul(crystalMult)
-        .mul(1 + 0.2 * infCrystalLv)
+        .mul(1 + 0.18 * infCrystalLv)
         .floor();
 
       m.divineCrystals = toDecimal(m.divineCrystals).add(crystalsEarned).toString();
       m.totalSlays += 1;
+      m.clearCounts[trib.id] = (m.clearCounts[trib.id] ?? 0) + 1;
 
       const prevBest = m.bestClearTimesMs[trib.id];
       const isNewRecord = prevBest === undefined || clearTimeMs < prevBest;
       if (isNewRecord) {
         m.bestClearTimesMs[trib.id] = clearTimeMs;
-      }
-
-      let unlockedNextOrder: number | null = null;
-      if (trib.order >= m.highestUnlockedOrder && trib.order < TRIBULATIONS.length) {
-        m.highestUnlockedOrder = trib.order + 1;
-        unlockedNextOrder = trib.order + 1;
       }
 
       let unlockedSssAutoRepeat = false;
@@ -862,68 +1072,109 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         if (trib.id === 'tier_5') m.affixStones += 50;
       }
 
-      // Grant bonus random relic levels (tier_6 ~ tier_10)
-      const totalBonusLevels =
-        trib.order >= 6
-          ? trib.bonusRelicLevels +
-            speedBonusLv +
-            (trib.id === 'tier_10' ? 5 * m.ngPlusCount : 0)
-          : 0;
+      // Deterministic Tribulation Clear Relic Drops into infinite relicDropLevels (or rarity crystals if special-capped)
+      const totalDropRolls =
+        trib.relicDropCount +
+        speedBonusDrops +
+        (trib.id === 'tier_10' ? Math.min(3, Number(m.ngPlusCount) || 0) : 0);
 
-      const grantedMap: Partial<Record<RelicId, number>> = {};
-      for (let k = 0; k < totalBonusLevels; k++) {
-        const cappedOwned = RELICS.filter(
-          (r) =>
-            r.maxLevel !== null &&
-            (m.relicLevels[r.id] ?? 0) > 0 &&
-            (m.relicLevels[r.id] ?? 0) < r.maxLevel
-        );
-        let chosenId: RelicId;
-        if (cappedOwned.length > 0) {
-          chosenId = cappedOwned[Math.floor(Math.random() * cappedOwned.length)].id;
+      const tierRelics = RELICS.filter((r) => r.tier === trib.relicDropTier);
+      const dropAgg: Partial<Record<RelicId, { levelsAdded: number; wasNew: boolean }>> = {};
+      const overflowAgg: Partial<Record<RelicId, { count: number; crystals: Decimal }>> = {};
+
+      for (let d = 0; d < totalDropRolls; d++) {
+        const unowned = tierRelics.filter((r) => getRelicTotalLv(m, r.id) === 0);
+        const picked =
+          unowned.length > 0
+            ? unowned[Math.floor(Math.random() * unowned.length)]
+            : tierRelics[Math.floor(Math.random() * tierRelics.length)];
+
+        if (!picked) continue;
+
+        const prevCrystalLv = m.relicLevels[picked.id] ?? 0;
+        const prevDropLv = m.relicDropLevels[picked.id] ?? 0;
+        const prevTotal = prevCrystalLv + prevDropLv;
+
+        if (picked.maxDropLevel !== null && prevDropLv >= picked.maxDropLevel) {
+          const tierBase = RELIC_TIER_META[picked.tier].overflowBaseCrystals;
+          const gain = new Decimal(tierBase)
+            .mul(ngMult)
+            .mul(1 + 0.18 * infCrystalLv)
+            .floor();
+          const curOv = overflowAgg[picked.id];
+          overflowAgg[picked.id] = {
+            count: (curOv?.count ?? 0) + 1,
+            crystals: (curOv?.crystals ?? new Decimal(0)).add(gain),
+          };
         } else {
-          chosenId = Math.random() < 0.5 ? 'rel_e_inf_dmg' : 'rel_e_inf_crystal';
-        }
-        m.relicLevels[chosenId] = (m.relicLevels[chosenId] ?? 0) + 1;
-        grantedMap[chosenId] = (grantedMap[chosenId] ?? 0) + 1;
-      }
-
-      const grantedRelicUpgrades = Object.entries(grantedMap).map(([id, levelsAdded]) => {
-        const rid = id as RelicId;
-        return {
-          relicId: rid,
-          name: RELIC_MAP[rid].name,
-          levelsAdded: levelsAdded ?? 0,
-          newLevel: m.relicLevels[rid] ?? 0,
-        };
-      });
-
-      // Mythic drop check (tier_7 ~ tier_10)
-      let mythicDropped: VictorySummary['mythicDropped'] = null;
-      if (trib.mythicDropChance > 0 && Math.random() < trib.mythicDropChance) {
-        const mythicRelics = RELICS.filter((r) => r.tier === 'mythic');
-        const unownedMythics = mythicRelics.filter((r) => (m.relicLevels[r.id] ?? 0) === 0);
-        if (unownedMythics.length > 0) {
-          const picked = unownedMythics[Math.floor(Math.random() * unownedMythics.length)];
-          m.relicLevels[picked.id] = 1;
-          mythicDropped = { relicId: picked.id, name: picked.name, newLevel: 1, isNew: true };
-        } else {
-          const upgradableMythics = mythicRelics.filter(
-            (r) => r.maxLevel !== null && (m.relicLevels[r.id] ?? 0) < r.maxLevel
-          );
-          const picked =
-            upgradableMythics.length > 0
-              ? upgradableMythics[Math.floor(Math.random() * upgradableMythics.length)]
-              : RELIC_MAP.rel_m_final_mult;
-          m.relicLevels[picked.id] = (m.relicLevels[picked.id] ?? 0) + 1;
-          mythicDropped = {
-            relicId: picked.id,
-            name: picked.name,
-            newLevel: m.relicLevels[picked.id],
-            isNew: false,
+          m.relicDropLevels[picked.id] = prevDropLv + 1;
+          const existing = dropAgg[picked.id];
+          dropAgg[picked.id] = {
+            levelsAdded: (existing?.levelsAdded ?? 0) + 1,
+            wasNew: existing ? existing.wasNew : prevTotal === 0,
           };
         }
       }
+
+      const convertedOverflowDrops: VictoryOverflowDropItem[] = Object.entries(overflowAgg).map(
+        ([id, info]) => {
+          const rid = id as RelicId;
+          const cfg = RELIC_MAP[rid];
+          return {
+            relicId: rid,
+            tier: cfg.tier,
+            name: cfg.name,
+            count: info!.count,
+            crystalsGained: info!.crystals.toString(),
+          };
+        }
+      );
+
+      const overflowCrystalBonus = Object.values(overflowAgg).reduce(
+        (acc, item) => acc.add(item?.crystals ?? 0),
+        new Decimal(0)
+      );
+
+      if (overflowCrystalBonus.gt(0)) {
+        m.divineCrystals = toDecimal(m.divineCrystals).add(overflowCrystalBonus).toString();
+      }
+
+      const relicDrops: VictoryRelicDropItem[] = Object.entries(dropAgg).map(([id, info]) => {
+        const rid = id as RelicId;
+        const cfg = RELIC_MAP[rid];
+        const bd = getRelicLevelsBreakdown(m, rid);
+        return {
+          relicId: rid,
+          tier: cfg.tier,
+          name: cfg.name,
+          levelsAdded: info!.levelsAdded,
+          newDropLevel: bd.dropLv,
+          crystalLevel: bd.crystalLv,
+          totalLevel: bd.totalLv,
+          isNew: info!.wasNew,
+        };
+      });
+
+      // Dual-lock check: require BOTH exponential prev clears AND total relic levels
+      let unlockedNextOrder: number | null = null;
+      while (m.highestUnlockedOrder < TRIBULATIONS.length) {
+        const check = getNextTribulationUnlockState(m);
+        if (!check.nextTrib || !check.canUnlock) break;
+        m.highestUnlockedOrder = check.nextTrib.order;
+        unlockedNextOrder = check.nextTrib.order;
+      }
+
+      const afterCheck = getNextTribulationUnlockState(m);
+      const nextUnlockProgress = afterCheck.nextTrib
+        ? {
+            nextOrder: afterCheck.nextTrib.order,
+            nextName: afterCheck.nextTrib.name,
+            prevClears: afterCheck.prevClears,
+            reqClears: afterCheck.reqClears,
+            totalRelicLevels: afterCheck.totalRelicLevels,
+            reqRelicLevels: afterCheck.reqRelicLevels,
+          }
+        : null;
 
       if (trib.id === 'tier_10') {
         m.ngPlusCount += 1;
@@ -941,17 +1192,23 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         rank,
         rankCrystalMult: crystalMult,
         crystalsEarned: crystalsEarned.toString(),
+        overflowCrystalBonus: overflowCrystalBonus.toString(),
+        convertedOverflowDrops,
         isNewRecord,
         firstClearNote,
-        grantedRelicUpgrades,
-        mythicDropped,
+        relicDrops,
+        grantedRelicUpgrades: [],
+        mythicDropped: null,
         unlockedNextOrder,
         unlockedSssAutoRepeat,
+        nextUnlockProgress,
       });
 
       if (m.autoRepeatEnabled && m.sssUnlockedAutoRepeat[trib.id]) {
+        autoRepeatCountdownRef.current = 2.0;
         setAutoRepeatCountdown(2.0);
       } else {
+        autoRepeatCountdownRef.current = null;
         setAutoRepeatCountdown(null);
       }
     },
@@ -1000,17 +1257,18 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       // Slot 2 Talent 1 (剧毒蔓延) or sp_poison_god
       if (slotIdx === 1) {
+        const MAX_POISON_STACKS = 1e12;
         if (slot.innateAffix === 'sp_poison_god') {
           if (nextRun.poisonStacks <= 0) {
             nextRun.poisonStacks = 3;
           } else {
-            nextRun.poisonStacks = Math.max(
-              nextRun.poisonStacks + 1,
-              Math.ceil(nextRun.poisonStacks * 1.05)
+            nextRun.poisonStacks = Math.min(
+              MAX_POISON_STACKS,
+              Math.max(nextRun.poisonStacks + 1, Math.ceil(nextRun.poisonStacks * 1.05))
             );
           }
         } else {
-          nextRun.poisonStacks += 3;
+          nextRun.poisonStacks = Math.min(MAX_POISON_STACKS, nextRun.poisonStacks + 3);
         }
       }
 
@@ -1202,10 +1460,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       nextRun.accumulatedAtk = toDecimal(nextRun.accumulatedAtk).add(totalGrowthGain).toString();
 
-      const echoLv = nextMeta.relicLevels.rel_m_click_echo ?? 0;
+      const echoLv = getRelicTotalLv(nextMeta, 'rel_m_click_echo');
       if (echoLv > 0) {
         nextRun.sharedHeroGrowth = toDecimal(nextRun.sharedHeroGrowth)
-          .add(totalGrowthGain.mul(0.1 * echoLv))
+          .add(totalGrowthGain.mul(Math.min(2.0, 0.1 * echoLv)))
           .toString();
       }
 
@@ -1265,10 +1523,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       // Slot 1 Talent 2 (御剑随心): every 12 cumulative clicks -> Slot 1 free attack
       if (nextMercs[0]?.unlocked && nextMercs[0].level > 0 && !nextRun.runCompleted) {
-        const swordTrig = Math.min(
-          5,
-          Math.floor(newStacks.div(12).toNumber()) - Math.floor(oldStacks.div(12).toNumber())
-        );
+        const rawSwordTrig = newStacks.div(12).floor().sub(oldStacks.div(12).floor()).toNumber();
+        const swordTrig = Number.isFinite(rawSwordTrig)
+          ? Math.max(0, Math.min(5, Math.floor(rawSwordTrig)))
+          : 5;
         for (let k = 0; k < swordTrig; k++) {
           if (nextRun.runCompleted) break;
           executeMercAttack(0, nextRun, nextMercs, nextMeta, false);
@@ -1276,13 +1534,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Every 20 cumulative clicks -> af_t3_click_t (伴生剑意)
-      const triggersCrossed20 = Math.min(
-        5,
-        Math.floor(newStacks.div(20).toNumber()) - Math.floor(oldStacks.div(20).toNumber())
-      );
+      const rawTrig20 = newStacks.div(20).floor().sub(oldStacks.div(20).floor()).toNumber();
+      const triggersCrossed20 = Number.isFinite(rawTrig20)
+        ? Math.max(0, Math.min(5, Math.floor(rawTrig20)))
+        : 5;
       if (triggersCrossed20 > 0 && !nextRun.runCompleted) {
         const s5 = isSlot5Active(nextMercs);
-        const firstRelicLv = nextMeta.relicLevels.rel_m_first_affix ?? 0;
+        const firstRelicLv = getRelicTotalLv(nextMeta, 'rel_m_first_affix');
         for (let t = 0; t < triggersCrossed20; t++) {
           for (let idx = 0; idx < nextMercs.length; idx++) {
             const m = nextMercs[idx];
@@ -1358,9 +1616,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const prevRun = runRef.current;
 
       if (prevRun.runCompleted) {
-        setAutoRepeatCountdown((prevCd) => {
-          if (prevCd === null) return null;
-          const nextCd = prevCd - dt;
+        const curCd = autoRepeatCountdownRef.current;
+        if (curCd !== null) {
+          const nextCd = curCd - dt;
           if (nextCd <= 0) {
             const curMeta = metaRef.current;
             const autoCasts = {
@@ -1371,6 +1629,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
             };
             const freshRun = createInitialRunState(prevRun.tribulationId, curMeta, autoCasts);
             const freshMercs = resetMercsForNewRun(mercsRef.current);
+            victoryTriggeredRef.current = false;
+            autoRepeatCountdownRef.current = null;
             runRef.current = freshRun;
             mercsRef.current = freshMercs;
             puppetAccRef.current = 0;
@@ -1379,10 +1639,12 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
             setRun(freshRun);
             setMercs(freshMercs);
             setVictorySummary(null);
-            return null;
+            setAutoRepeatCountdown(null);
+          } else {
+            autoRepeatCountdownRef.current = nextCd;
+            setAutoRepeatCountdown(nextCd);
           }
-          return nextCd;
-        });
+        }
         return;
       }
 
@@ -1407,6 +1669,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         ...metaRef.current,
         shownTutorials: { ...metaRef.current.shownTutorials },
         relicLevels: { ...metaRef.current.relicLevels },
+        relicDropLevels: { ...(metaRef.current.relicDropLevels ?? {}) },
       };
 
       if (nextRun.timerStarted) {
@@ -1414,7 +1677,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       }
 
       // Skill timers & auto-cast
-      const hasMythicAuto = (nextMeta.relicLevels.rel_m_auto_skill ?? 0) > 0;
+      const hasMythicAuto = getRelicTotalLv(nextMeta, 'rel_m_auto_skill') > 0;
       for (const cfg of SKILLS) {
         const sk = nextRun.skills[cfg.id];
         if (sk.activeRemaining > 0) {
@@ -1684,6 +1947,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         ...metaRef.current,
         shownTutorials: { ...metaRef.current.shownTutorials },
         relicLevels: { ...metaRef.current.relicLevels },
+        relicDropLevels: { ...(metaRef.current.relicDropLevels ?? {}) },
       };
 
       const res = applyHeroClicks(nextRun, nextMercs, nextMeta, 1, 'manual', xPct, yPct);
@@ -1810,6 +2074,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         ...metaRef.current,
         shownTutorials: { ...metaRef.current.shownTutorials },
         relicLevels: { ...metaRef.current.relicLevels },
+        relicDropLevels: { ...(metaRef.current.relicDropLevels ?? {}) },
       };
 
       const cfg = SKILLS.find((s) => s.id === skillId)!;
@@ -1892,7 +2157,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const toggleSkillAutoCast = useCallback((skillId: SkillId) => {
     if (
       !metaRef.current.unlockedAutoSkill &&
-      (metaRef.current.relicLevels.rel_m_auto_skill ?? 0) <= 0
+      getRelicTotalLv(metaRef.current, 'rel_m_auto_skill') <= 0
     ) {
       return;
     }
@@ -1991,7 +2256,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       const newLv = slot.level + count + bonusLevels;
       const effLv = slot.innateAffix === 'sp_double_lvl' ? newLv * 2 : newLv;
-      const luckLv = metaRef.current.relicLevels.rel_e_affix_luck ?? 0;
+      const luckLv = getRelicTotalLv(metaRef.current, 'rel_e_affix_luck');
 
       const prevOpen = slot.unlockedLevelSlots;
       let nextOpen = prevOpen;
@@ -2082,7 +2347,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       const curMeta = metaRef.current;
       const stoneCost = 2;
-      const freeChance = 0.05 * (curMeta.relicLevels.rel_e_free_roll ?? 0);
+      const freeChance = Math.min(0.8, 0.05 * getRelicTotalLv(curMeta, 'rel_e_free_roll'));
       const isFreeRoll = freeChance > 0 && Math.random() < freeChance;
 
       if (!isFreeRoll && curMeta.affixStones < stoneCost) {
@@ -2097,7 +2362,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         triggeredPity = true;
       }
 
-      const luckLv = curMeta.relicLevels.rel_e_affix_luck ?? 0;
+      const luckLv = getRelicTotalLv(curMeta, 'rel_e_affix_luck');
       const candidates = [...slot.levelAffixes];
       const rolledAffix: AffixInstance = {
         id: rollRandomAffixId(),
@@ -2162,7 +2427,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       const curMeta = metaRef.current;
       const stoneCost = targetIndices.length;
-      const freeChance = 0.05 * (curMeta.relicLevels.rel_e_free_roll ?? 0);
+      const freeChance = Math.min(0.8, 0.05 * getRelicTotalLv(curMeta, 'rel_e_free_roll'));
       const isFreeRoll = freeChance > 0 && Math.random() < freeChance;
 
       if (!isFreeRoll && curMeta.affixStones < stoneCost) {
@@ -2177,7 +2442,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         triggeredPity = true;
       }
 
-      const luckLv = curMeta.relicLevels.rel_e_affix_luck ?? 0;
+      const luckLv = getRelicTotalLv(curMeta, 'rel_e_affix_luck');
       const candidates = [...slot.levelAffixes];
       const pityPickIdx = triggeredPity
         ? targetIndices[Math.floor(Math.random() * targetIndices.length)]
@@ -2264,7 +2529,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       }
 
       const crystalCost = 5;
-      const freeChance = 0.05 * (curMeta.relicLevels.rel_e_free_roll ?? 0);
+      const freeChance = Math.min(0.8, 0.05 * getRelicTotalLv(curMeta, 'rel_e_free_roll'));
       const isFreeRoll = freeChance > 0 && Math.random() < freeChance;
       const curCrystals = toDecimal(curMeta.divineCrystals);
 
@@ -2317,77 +2582,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     [saveToLocalStorage]
   );
 
-  const pullRandomRelic = useCallback(() => {
-    const curMeta = metaRef.current;
-    const cost = getRelicPullCost(curMeta);
-    const crystals = toDecimal(curMeta.divineCrystals);
-    if (crystals.lt(cost)) {
-      showToast(`神晶不足（需 ${cost} 颗神晶）`);
-      return;
-    }
-
-    const ownedCommonCount = RELICS.filter(
-      (r) => r.tier === 'common' && (curMeta.relicLevels[r.id] ?? 0) > 0
-    ).length;
-
-    const pool = RELICS.filter((r) => {
-      if ((curMeta.relicLevels[r.id] ?? 0) > 0) return false;
-      if (r.tier === 'mythic') return false;
-      if (r.tier === 'rare' && ownedCommonCount < 3) return false;
-      if (r.tier === 'epic' && !curMeta.unlockedEpicPool) return false;
-      return true;
-    });
-
-    if (pool.length === 0) {
-      const unownedStd = RELICS.filter(
-        (r) => r.tier !== 'mythic' && (curMeta.relicLevels[r.id] ?? 0) === 0
-      );
-      if (unownedStd.length === 0) {
-        showToast('25 件常驻遗物已全部集齐！');
-      } else {
-        showToast('请先凑齐 3 件凡阶或通关劫数三开启仙阶遗物池');
-      }
-      return;
-    }
-
-    const tierWeights = { common: 60, rare: 30, epic: 10, mythic: 0 };
-    const totalWeight = pool.reduce((s, r) => s + tierWeights[r.tier], 0);
-    let roll = Math.random() * totalWeight;
-    let picked = pool[0];
-    for (const r of pool) {
-      if (roll < tierWeights[r.tier]) {
-        picked = r;
-        break;
-      }
-      roll -= tierWeights[r.tier];
-    }
-
-    const nextMeta: MetaState = {
-      ...curMeta,
-      divineCrystals: crystals.sub(cost).toString(),
-      relicLevels: {
-        ...curMeta.relicLevels,
-        [picked.id]: 1,
-      },
-    };
-    metaRef.current = nextMeta;
-    setMeta(nextMeta);
-    soundEngine.playBurst();
-    saveToLocalStorage();
-    showToast(`凝练遗物成功！获得【${picked.name}】`);
-  }, [saveToLocalStorage, showToast]);
-
   const upgradeRelic = useCallback(
     (relicId: RelicId) => {
       const curMeta = metaRef.current;
       const cfg = RELIC_MAP[relicId];
-      const curLv = curMeta.relicLevels[relicId] ?? 0;
-      if (curLv <= 0) return;
-      if (cfg.maxLevel !== null && curLv >= cfg.maxLevel) {
-        showToast('该遗物已达满级');
+      const bd = getRelicLevelsBreakdown(curMeta, relicId);
+      if (!bd.owned) return;
+      if (cfg.maxLevel !== null && bd.crystalLv >= cfg.maxLevel) {
+        showToast('该遗物神晶升阶已达上限');
         return;
       }
-      const cost = getRelicUpgradeCost(relicId, curLv);
+      const cost = getRelicUpgradeCost(relicId, bd.crystalLv);
       const crystals = toDecimal(curMeta.divineCrystals);
       if (crystals.lt(cost)) {
         showToast(`神晶不足（需 ${formatNumber(cost, settingsRef.current.numberMode)} 神晶）`);
@@ -2398,13 +2603,23 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         divineCrystals: crystals.sub(cost).toString(),
         relicLevels: {
           ...curMeta.relicLevels,
-          [relicId]: curLv + 1,
+          [relicId]: bd.crystalLv + 1,
         },
       };
+      let newlyUnlockedOrder: number | null = null;
+      while (nextMeta.highestUnlockedOrder < TRIBULATIONS.length) {
+        const check = getNextTribulationUnlockState(nextMeta);
+        if (!check.nextTrib || !check.canUnlock) break;
+        nextMeta.highestUnlockedOrder = check.nextTrib.order;
+        newlyUnlockedOrder = check.nextTrib.order;
+      }
       metaRef.current = nextMeta;
       setMeta(nextMeta);
       soundEngine.playBurst();
       saveToLocalStorage();
+      if (newlyUnlockedOrder !== null) {
+        showToast(`遗物总阶突破门槛！已破禁解锁【劫数 ${newlyUnlockedOrder}】！`);
+      }
     },
     [saveToLocalStorage, showToast]
   );
@@ -2424,11 +2639,16 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       };
       const freshRun = createInitialRunState(tribId, metaRef.current, autoCasts);
       const freshMercs = resetMercsForNewRun(mercsRef.current);
+      victoryTriggeredRef.current = false;
+      autoRepeatCountdownRef.current = null;
       runRef.current = freshRun;
       mercsRef.current = freshMercs;
       puppetAccRef.current = 0;
       cloneAccRef.current = 0;
       poisonTickAccRef.current = 0;
+      setIsHitSquashed(false);
+      setIsArenaShaking(false);
+      setHitOffset({ x: 0, y: 0 });
       setRun(freshRun);
       setMercs(freshMercs);
       setVictorySummary(null);
@@ -2452,12 +2672,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     };
     const freshRun = createInitialRunState(runRef.current.tribulationId, curMeta, autoCasts);
     const freshMercs = resetMercsForNewRun(mercsRef.current);
+    victoryTriggeredRef.current = false;
+    autoRepeatCountdownRef.current = null;
     metaRef.current = curMeta;
     runRef.current = freshRun;
     mercsRef.current = freshMercs;
     puppetAccRef.current = 0;
     cloneAccRef.current = 0;
     poisonTickAccRef.current = 0;
+    setIsHitSquashed(false);
+    setIsArenaShaking(false);
+    setHitOffset({ x: 0, y: 0 });
     setMeta(curMeta);
     setRun(freshRun);
     setMercs(freshMercs);
@@ -2471,7 +2696,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     setMeta((prev) => {
       const next = { ...prev, autoRepeatEnabled: !prev.autoRepeatEnabled };
       metaRef.current = next;
-      if (!next.autoRepeatEnabled) setAutoRepeatCountdown(null);
+      if (!next.autoRepeatEnabled) {
+        autoRepeatCountdownRef.current = null;
+        setAutoRepeatCountdown(null);
+      }
       return next;
     });
   }, []);
@@ -2635,62 +2863,78 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       const defMeta = createInitialMetaState();
       const defMercs = createInitialMercsState();
-      const nextMeta: MetaState = {
-        ...defMeta,
-        ...parsed.meta,
-        totalPlayTimeMs: Number(parsed.meta.totalPlayTimeMs ?? 0) || 0,
-        totalClicks: parsed.meta.totalClicks ?? '0',
-        highestDps: parsed.meta.highestDps ?? '0',
-        totalRerolls: Number(parsed.meta.totalRerolls ?? 0) || 0,
-        shownTutorials: { ...defMeta.shownTutorials, ...(parsed.meta.shownTutorials ?? {}) },
-        relicLevels: { ...defMeta.relicLevels, ...(parsed.meta.relicLevels ?? {}) },
-        clearedTribulations: {
-          ...defMeta.clearedTribulations,
-          ...(parsed.meta.clearedTribulations ?? {}),
-        },
-        bestClearTimesMs: { ...(parsed.meta.bestClearTimesMs ?? {}) },
-        sssUnlockedAutoRepeat: { ...(parsed.meta.sssUnlockedAutoRepeat ?? {}) },
-      };
+      const nextMeta = sanitizeMetaState(parsed.meta, defMeta);
+      const sanitizedMercs = sanitizeMercsState(parsed.mercs, defMercs);
 
-      const nextMercs = parsed.mercs.map((m, i) => ({
-        ...defMercs[i],
-        ...m,
-        slotIndex: i,
-        archetype: FIXED_SLOT_ARCHETYPES[i],
-        levelAffixes: normalizeTenSlots<AffixInstance | null>(m.levelAffixes, null),
-        lockedLevelSlots: normalizeTenSlots<boolean>(m.lockedLevelSlots, false),
-        attackCount: Number(m.attackCount ?? 0) || 0,
-      }));
-
-      const baseRun = createInitialRunState(parsed.run.tribulationId, nextMeta);
-      const nextRun: RunState = {
-        ...baseRun,
-        ...parsed.run,
-        phaseIndex: Math.max(
-          0,
-          Math.min(BOSS_SHELLS.length - 1, Number(parsed.run.phaseIndex ?? 0) || 0)
-        ),
-        skills: {
-          sk_blood: { ...baseRun.skills.sk_blood, ...(parsed.run.skills?.sk_blood ?? {}) },
-          sk_clone: { ...baseRun.skills.sk_clone, ...(parsed.run.skills?.sk_clone ?? {}) },
-          sk_thunder: { ...baseRun.skills.sk_thunder, ...(parsed.run.skills?.sk_thunder ?? {}) },
-          sk_sync: { ...baseRun.skills.sk_sync, ...(parsed.run.skills?.sk_sync ?? {}) },
-        },
-        heroBuffStacks: Array.isArray(parsed.run.heroBuffStacks)
-          ? parsed.run.heroBuffStacks.filter(
-              (b) => typeof b?.val === 'number' && typeof b?.expiresAt === 'number'
-            )
-          : [],
-        recentTickDps: {
-          hero: parsed.run.recentTickDps?.hero ?? baseRun.recentTickDps.hero,
-          poison: parsed.run.recentTickDps?.poison ?? baseRun.recentTickDps.poison,
-          mercs:
-            Array.isArray(parsed.run.recentTickDps?.mercs) &&
-            parsed.run.recentTickDps.mercs.length === 5
-              ? (parsed.run.recentTickDps.mercs as [string, string, string, string, string])
-              : baseRun.recentTickDps.mercs,
-        },
-      };
+      const tribId = parsed.run.tribulationId as TribulationId;
+      const baseRun = createInitialRunState(tribId, nextMeta);
+      const nextMercs = parsed.run.runCompleted
+        ? resetMercsForNewRun(sanitizedMercs)
+        : sanitizedMercs;
+      const nextRun: RunState = parsed.run.runCompleted
+        ? baseRun
+        : {
+            ...baseRun,
+            ...parsed.run,
+            tribulationId: tribId,
+            phaseIndex: safeInt(parsed.run.phaseIndex, 0, 0, BOSS_SHELLS.length - 1),
+            bossHp: safeDecimalStr(parsed.run.bossHp, baseRun.bossHp),
+            bossMaxHp: safeDecimalStr(parsed.run.bossMaxHp, baseRun.bossMaxHp),
+            poisonStacks: safeInt(parsed.run.poisonStacks, 0, 0, 1e12),
+            spiritStones: safeDecimalStr(parsed.run.spiritStones, baseRun.spiritStones),
+            mana: safeFloat(parsed.run.mana, baseRun.mana, 0, 100000),
+            clickStacks: safeDecimalStr(parsed.run.clickStacks, '0'),
+            manualClicks: safeInt(parsed.run.manualClicks, 0, 0),
+            swordAndHeroAttacksForCannon: safeInt(
+              parsed.run.swordAndHeroAttacksForCannon,
+              0,
+              0,
+              1000
+            ),
+            enlightenmentLevel: safeInt(parsed.run.enlightenmentLevel, 1, 1, 1000000),
+            accumulatedAtk: safeDecimalStr(parsed.run.accumulatedAtk, baseRun.accumulatedAtk),
+            sharedHeroGrowth: safeDecimalStr(parsed.run.sharedHeroGrowth, '0'),
+            realmLevel: safeInt(parsed.run.realmLevel, 0, 0, 10000),
+            puppetLevel: safeInt(parsed.run.puppetLevel, baseRun.puppetLevel, 0, PUPPET_MAX_LEVEL),
+            elapsedMs: safeFloat(parsed.run.elapsedMs, 0, 0),
+            runCompleted: false,
+            skills: {
+              sk_blood: { ...baseRun.skills.sk_blood, ...(parsed.run.skills?.sk_blood ?? {}) },
+              sk_clone: { ...baseRun.skills.sk_clone, ...(parsed.run.skills?.sk_clone ?? {}) },
+              sk_thunder: {
+                ...baseRun.skills.sk_thunder,
+                ...(parsed.run.skills?.sk_thunder ?? {}),
+              },
+              sk_sync: { ...baseRun.skills.sk_sync, ...(parsed.run.skills?.sk_sync ?? {}) },
+            },
+            heroBuffStacks: Array.isArray(parsed.run.heroBuffStacks)
+              ? parsed.run.heroBuffStacks.filter(
+                  (b) =>
+                    typeof b?.val === 'number' &&
+                    Number.isFinite(b.val) &&
+                    typeof b?.expiresAt === 'number' &&
+                    Number.isFinite(b.expiresAt)
+                )
+              : [],
+            recentTickDps: {
+              hero: safeDecimalStr(parsed.run.recentTickDps?.hero, baseRun.recentTickDps.hero),
+              poison: safeDecimalStr(
+                parsed.run.recentTickDps?.poison,
+                baseRun.recentTickDps.poison
+              ),
+              mercs:
+                Array.isArray(parsed.run.recentTickDps?.mercs) &&
+                parsed.run.recentTickDps.mercs.length === 5
+                  ? (parsed.run.recentTickDps.mercs.map((v) => safeDecimalStr(v, '0')) as [
+                      string,
+                      string,
+                      string,
+                      string,
+                      string,
+                    ])
+                  : baseRun.recentTickDps.mercs,
+            },
+          };
 
       const rawFloatMode = parsed.settings?.floatingTextMode;
       const nextSettings: SettingsState = {
@@ -2715,6 +2959,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       };
 
       const savedAt = Date.now();
+      victoryTriggeredRef.current = false;
+      autoRepeatCountdownRef.current = null;
       metaRef.current = nextMeta;
       mercsRef.current = nextMercs;
       runRef.current = nextRun;
@@ -2750,6 +2996,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const freshMeta = createInitialMetaState();
       const freshMercs = createInitialMercsState();
       const freshRun = createInitialRunState('tier_1', freshMeta);
+      victoryTriggeredRef.current = false;
+      autoRepeatCountdownRef.current = null;
       metaRef.current = freshMeta;
       mercsRef.current = freshMercs;
       runRef.current = freshRun;
@@ -2775,6 +3023,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   );
 
   const clearVictorySummary = useCallback(() => {
+    autoRepeatCountdownRef.current = null;
     setVictorySummary(null);
     setAutoRepeatCountdown(null);
   }, []);
@@ -2819,7 +3068,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         confirmPendingLevelAffixes,
         rerollMercInnate,
         confirmPendingInnateAffix,
-        pullRandomRelic,
         upgradeRelic,
         switchTribulation,
         toggleAutoRepeat,

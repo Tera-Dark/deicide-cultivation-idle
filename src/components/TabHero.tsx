@@ -66,20 +66,20 @@ export function TabHero() {
   const showPuppet = meta.hasUnlockedPuppet || run.puppetLevel > 0;
 
   return (
-    <div className="space-y-2">
+    <div className="space-y-2.5">
       {/* Realm Breakthrough Card */}
-      <div className="bg-[#171a29] border border-[#c084fc]/45 rounded-lg p-2.5 flex items-center justify-between gap-2.5">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-2">
-            <span className="font-display text-sm font-black tracking-wide text-[#e9d5ff] text-glow-purple truncate">
+      <div className="bg-[#171a29] border border-[#c084fc]/45 rounded-xl p-3.5 flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-baseline gap-2 flex-wrap">
+            <span className="font-display text-[15px] font-black tracking-wide text-[#e9d5ff] text-glow-purple">
               {curRealm.name}
             </span>
-            <span className="font-mono-num text-xs font-bold text-[#c084fc] shrink-0">
+            <span className="font-mono-num text-[13px] font-bold text-[#c084fc] shrink-0">
               ×{formatNumber(heroStats.realmMult, settings.numberMode)}
             </span>
-            <span className="text-[11px] text-[#94a3b8] shrink-0">→ {nextRealm.name}</span>
+            <span className="text-xs text-[#94a3b8] shrink-0">→ {nextRealm.name}</span>
           </div>
-          <p className="text-[11px] font-mono-num text-[#94a3b8] truncate mt-0.5">
+          <p className="text-xs font-mono-num text-[#94a3b8] leading-snug">
             灵石 {formatNumber(nextRealm.reqStones, settings.numberMode)}
             {nextRealm.reqClicks > 0 ? ` · 点击 ${nextRealm.reqClicks}` : ''} · 下阶 ×
             {formatNumber(nextRealm.multiplier, settings.numberMode)}
@@ -90,38 +90,38 @@ export function TabHero() {
           type="button"
           onClick={breakthroughRealm}
           disabled={!canBreakRealm}
-          className={`px-3 py-2 rounded-md text-xs font-display font-bold tracking-wide inline-flex items-center gap-1 shrink-0 transition-colors cursor-pointer whitespace-nowrap ${
+          className={`min-h-[48px] min-w-[108px] px-3.5 py-2 rounded-lg text-[13px] font-display font-bold tracking-wide inline-flex items-center justify-center gap-1.5 shrink-0 transition-colors cursor-pointer whitespace-nowrap ${
             canBreakRealm
               ? 'bg-[#a855f7]/30 border border-[#c084fc]/70 text-[#faf5ff] hover:bg-[#a855f7]/45'
               : 'bg-[#1e2235] border border-[#2e3552] text-[#64748b] cursor-not-allowed'
           }`}
         >
-          <ArrowUpCircle className="w-3.5 h-3.5" />
+          <ArrowUpCircle className="w-4 h-4 shrink-0" />
           <span>{canBreakRealm ? '破境' : '未达标'}</span>
         </button>
       </div>
 
-      {/* Enlightenment Compact Card */}
-      <div className="bg-[#171a29] border border-[#2e3552] rounded-lg p-2.5 flex items-center justify-between gap-2.5">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-1.5">
-            <Sparkles className="w-3.5 h-3.5 text-[#22d3ee] shrink-0 self-center" />
-            <span className="font-display text-[13px] font-black tracking-wide text-[#f4f1ea]">
+      {/* Enlightenment Card */}
+      <div className="bg-[#171a29] border border-[#2e3552] rounded-xl p-3.5 flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-baseline gap-1.5 flex-wrap">
+            <Sparkles className="w-4 h-4 text-[#22d3ee] shrink-0 self-center" />
+            <span className="font-display text-[15px] font-black tracking-wide text-[#f4f1ea]">
               顿悟
             </span>
-            <span className="font-mono-num text-xs font-bold text-[#22d3ee] text-glow-cyan">
+            <span className="font-mono-num text-[13px] font-bold text-[#22d3ee] text-glow-cyan">
               Lv.{run.enlightenmentLevel}
             </span>
             {heroStats.isSoftCapped && (
               <span
-                className="text-[10px] font-semibold text-[#fbbf24] shrink-0"
+                className="text-xs font-semibold text-[#fbbf24] shrink-0"
                 title="已触发 500 击心魔瓶颈：继续升级顿悟或转培养护法"
               >
                 · 心魔瓶颈(20%)
               </span>
             )}
           </div>
-          <p className="text-[11px] text-[#a3b1cc] truncate mt-0.5 font-mono-num">
+          <p className="text-xs text-[#a3b1cc] font-mono-num leading-snug">
             单击{' '}
             <span className="text-[#e2e8f0] font-semibold">
               {formatNumber(heroStats.rawHeroClick, settings.numberMode)}
@@ -138,34 +138,34 @@ export function TabHero() {
           type="button"
           onClick={upgradeEnlightenment}
           disabled={enlBulk.count <= 0 || stones.lt(enlBulk.totalCost)}
-          className={`min-w-[100px] px-2.5 py-1.5 rounded-md text-xs font-medium text-right shrink-0 transition-colors cursor-pointer ${
+          className={`min-h-[48px] min-w-[114px] px-3 py-2 rounded-lg text-[13px] font-medium text-right shrink-0 transition-colors cursor-pointer flex flex-col justify-center ${
             enlBulk.count > 0 && stones.gte(enlBulk.totalCost)
               ? 'bg-[#06b6d4]/22 border border-[#22d3ee]/55 text-[#ecfeff] hover:bg-[#06b6d4]/35'
               : 'bg-[#1e2235] border border-[#2e3552] text-[#64748b] cursor-not-allowed'
           }`}
         >
-          <div className="font-semibold leading-tight">升级 +{enlBulk.count}</div>
-          <div className="font-mono-num text-[10px] opacity-90">
+          <div className="font-bold leading-tight">升级 +{enlBulk.count}</div>
+          <div className="font-mono-num text-[11px] opacity-90 mt-0.5">
             {formatNumber(enlBulk.totalCost, settings.numberMode)} 灵石
           </div>
         </button>
       </div>
 
-      {/* Puppet Card (Progressive reveal after breaking Phase 1) */}
-      <div className="bg-[#171a29] border border-[#2e3552] rounded-lg p-2.5 flex items-center justify-between gap-2.5">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-baseline gap-1.5">
-            <Bot className="w-3.5 h-3.5 text-[#34d399] shrink-0 self-center" />
-            <span className="font-display text-[13px] font-black tracking-wide text-[#6ee7b7] text-glow-emerald">
+      {/* Puppet Card */}
+      <div className="bg-[#171a29] border border-[#2e3552] rounded-xl p-3.5 flex items-center justify-between gap-3">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-baseline gap-1.5 flex-wrap">
+            <Bot className="w-4 h-4 text-[#34d399] shrink-0 self-center" />
+            <span className="font-display text-[15px] font-black tracking-wide text-[#6ee7b7] text-glow-emerald">
               机关傀儡
             </span>
-            <span className="font-mono-num text-xs font-bold text-[#34d399]">
+            <span className="font-mono-num text-[13px] font-bold text-[#34d399]">
               {showPuppet
                 ? `Lv.${run.puppetLevel}/${PUPPET_MAX_LEVEL} · ${heroStats.puppetRate.toFixed(1)}/s`
                 : '未解锁'}
             </span>
           </div>
-          <p className="text-[11px] text-[#a3b1cc] truncate mt-0.5">
+          <p className="text-xs text-[#a3b1cc] leading-snug">
             {showPuppet
               ? '自动叩击古神（享 25% 顿悟修为成长）'
               : '首次击破第 1 重躯壳（500 血）后开放'}
@@ -173,8 +173,8 @@ export function TabHero() {
         </div>
 
         {!showPuppet ? (
-          <div className="px-2.5 py-2 rounded-md text-[11px] text-[#94a3b8] bg-[#101322] border border-[#2e3552] inline-flex items-center gap-1 shrink-0">
-            <Lock className="w-3 h-3" />
+          <div className="min-h-[48px] min-w-[108px] px-3 py-2 rounded-lg text-xs text-[#94a3b8] bg-[#101322] border border-[#2e3552] inline-flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap">
+            <Lock className="w-3.5 h-3.5" />
             <span>破1重开</span>
           </div>
         ) : (
@@ -182,7 +182,7 @@ export function TabHero() {
             type="button"
             onClick={buyPuppet}
             disabled={puppetAtMax || pupBulk.count <= 0 || stones.lt(pupBulk.totalCost)}
-            className={`min-w-[100px] px-2.5 py-1.5 rounded-md text-xs font-medium text-right shrink-0 transition-colors cursor-pointer ${
+            className={`min-h-[48px] min-w-[114px] px-3 py-2 rounded-lg text-[13px] font-medium text-right shrink-0 transition-colors cursor-pointer flex flex-col justify-center ${
               puppetAtMax
                 ? 'bg-[#10b981]/18 border border-[#34d399]/35 text-[#a7f3d0] cursor-default'
                 : pupBulk.count > 0 && stones.gte(pupBulk.totalCost)
@@ -191,13 +191,13 @@ export function TabHero() {
             }`}
           >
             {puppetAtMax ? (
-              <div className="text-center font-semibold">已满级</div>
+              <div className="text-center font-bold">已满级</div>
             ) : (
               <>
-                <div className="font-semibold leading-tight">
+                <div className="font-bold leading-tight">
                   {run.puppetLevel === 0 ? '激活' : `升级 +${pupBulk.count}`}
                 </div>
-                <div className="font-mono-num text-[10px] opacity-90">
+                <div className="font-mono-num text-[11px] opacity-90 mt-0.5">
                   {formatNumber(pupBulk.totalCost, settings.numberMode)} 灵石
                 </div>
               </>
@@ -206,10 +206,10 @@ export function TabHero() {
         )}
       </div>
 
-      {/* 4 Active Skills Compact Upgrade List */}
-      <div className="pt-1 space-y-1.5">
-        <div className="flex items-center gap-1.5 px-1 text-[11px] font-display font-bold tracking-[0.08em] text-[#7dd3fc]">
-          <Zap className="w-3.5 h-3.5 text-[#38bdf8]" />
+      {/* 4 Active Skills Upgrade List */}
+      <div className="pt-1.5 space-y-2">
+        <div className="flex items-center gap-1.5 px-1 text-xs font-display font-bold tracking-[0.08em] text-[#7dd3fc]">
+          <Zap className="w-4 h-4 text-[#38bdf8]" />
           <span>神通强化</span>
         </div>
 
@@ -232,26 +232,26 @@ export function TabHero() {
           return (
             <div
               key={cfg.id}
-              className={`rounded-lg p-2.5 border flex items-center justify-between gap-2.5 ${
+              className={`rounded-xl p-3.5 border flex items-center justify-between gap-3 ${
                 unlocked
                   ? 'bg-[#171a29] border-[#2e3552]'
-                  : 'bg-[#121523] border-white/8 opacity-65'
+                  : 'bg-[#121523] border-white/8 opacity-70'
               }`}
             >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-baseline gap-2">
-                  <span className="font-display text-[13px] font-extrabold tracking-wide text-[#f4f1ea]">
+              <div className="min-w-0 flex-1 space-y-1">
+                <div className="flex items-baseline gap-2 flex-wrap">
+                  <span className="font-display text-[15px] font-extrabold tracking-wide text-[#f4f1ea]">
                     {cfg.name}
                   </span>
-                  <span className="font-mono-num text-[11px] font-bold text-[#38bdf8]">
+                  <span className="font-mono-num text-xs font-bold text-[#38bdf8]">
                     Lv.{sk.level} · {eff.manaCost}蓝 · {eff.cooldown.toFixed(0)}s
                   </span>
                 </div>
-                <p className="text-[11px] text-[#a3b1cc] truncate mt-0.5">{cfg.shortDesc}</p>
+                <p className="text-xs text-[#a3b1cc] leading-snug">{cfg.shortDesc}</p>
               </div>
 
               {!unlocked ? (
-                <div className="px-2.5 py-2 rounded-md text-[11px] text-[#94a3b8] bg-[#101322] border border-[#2e3552] shrink-0 whitespace-nowrap">
+                <div className="min-h-[48px] min-w-[108px] px-3 py-2 rounded-lg text-xs text-[#94a3b8] bg-[#101322] border border-[#2e3552] shrink-0 whitespace-nowrap flex items-center justify-center">
                   需{reqRealm?.name}
                 </div>
               ) : (
@@ -259,14 +259,14 @@ export function TabHero() {
                   type="button"
                   onClick={() => upgradeSkill(cfg.id)}
                   disabled={!canBuy}
-                  className={`min-w-[100px] px-2.5 py-1.5 rounded-md text-xs font-medium text-right shrink-0 transition-colors cursor-pointer ${
+                  className={`min-h-[48px] min-w-[114px] px-3 py-2 rounded-lg text-[13px] font-medium text-right shrink-0 transition-colors cursor-pointer flex flex-col justify-center ${
                     canBuy
                       ? 'bg-[#3b82f6]/25 border border-[#60a5fa]/55 text-[#eff6ff] hover:bg-[#3b82f6]/35'
                       : 'bg-[#1e2235] border border-[#2e3552] text-[#64748b] cursor-not-allowed'
                   }`}
                 >
-                  <div className="font-semibold leading-tight">强化 +{skBulk.count}</div>
-                  <div className="font-mono-num text-[10px] opacity-90">
+                  <div className="font-bold leading-tight">强化 +{skBulk.count}</div>
+                  <div className="font-mono-num text-[11px] opacity-90 mt-0.5">
                     {formatNumber(skBulk.totalCost, settings.numberMode)} 灵石
                   </div>
                 </button>

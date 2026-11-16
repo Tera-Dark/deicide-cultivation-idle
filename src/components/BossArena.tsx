@@ -8,6 +8,7 @@ import {
   getGlobalMult,
   getHeroStats,
   getPoisonTickExpectedDamage,
+  getRelicTotalLv,
   getSkillEffectiveValues,
 } from '../core/damageCalc';
 import { formatNumber, toDecimal } from '../core/formatNumber';
@@ -121,7 +122,7 @@ function BossSacredGeometry({
   return (
     <svg
       viewBox="0 0 200 200"
-      className={`w-28 h-28 sm:w-32 sm:h-32 overflow-visible transition-transform duration-300 ${scaleClass}`}
+      className={`w-24 h-24 sm:w-28 sm:h-28 lg:w-36 lg:h-36 overflow-visible transition-transform duration-300 ${scaleClass}`}
       style={{ filter: glowColor }}
     >
       <circle
@@ -317,8 +318,10 @@ export function BossArena() {
 
   const hp = toDecimal(run.bossHp);
   const maxHp = toDecimal(run.bossMaxHp).max(1);
-  const hpPct = Math.max(0, Math.min(100, hp.div(maxHp).mul(100).toNumber()));
-  const manaPct = Math.max(0, Math.min(100, (run.mana / Math.max(1, heroStats.manaCap)) * 100));
+  const rawHpPct = hp.div(maxHp).mul(100).toNumber();
+  const hpPct = Number.isFinite(rawHpPct) ? Math.max(0, Math.min(100, rawHpPct)) : 0;
+  const rawManaPct = (run.mana / Math.max(1, heroStats.manaCap)) * 100;
+  const manaPct = Number.isFinite(rawManaPct) ? Math.max(0, Math.min(100, rawManaPct)) : 0;
 
   const heroDps = toDecimal(run.recentTickDps.hero);
   const poisonDps = toDecimal(run.recentTickDps.poison);
@@ -349,21 +352,22 @@ export function BossArena() {
   };
 
   const canToggleAutoSkill =
-    meta.unlockedAutoSkill || (meta.relicLevels.rel_m_auto_skill ?? 0) > 0;
-  const mythicAutoFree = (meta.relicLevels.rel_m_auto_skill ?? 0) > 0;
+    meta.unlockedAutoSkill || getRelicTotalLv(meta, 'rel_m_auto_skill') > 0;
+  const mythicAutoFree = getRelicTotalLv(meta, 'rel_m_auto_skill') > 0;
   const unlockedMercs = mercs.filter((m) => m.unlocked);
+  const activeVfx = settings.hitVfxEnabled && !run.runCompleted;
 
   return (
     <section
-      className={`h-[43%] min-h-[265px] shrink-0 relative flex flex-col border-b border-[#2e3552] bg-[#101322] ${
-        settings.hitVfxEnabled && isArenaShaking ? 'animate-arena-shake' : ''
+      className={`h-[37dvh] min-h-[248px] max-h-[325px] lg:h-full lg:max-h-none lg:w-[44%] shrink-0 relative flex flex-col border-b lg:border-b-0 lg:border-r border-[#2e3552] bg-[#101322] ${
+        activeVfx && isArenaShaking ? 'animate-arena-shake' : ''
       }`}
     >
       {/* Top Info: Shell Name, Dual-Layer HP Bar, 10 Phase Nodes */}
-      <div className="px-3 pt-2 pb-1.5 bg-[#151827]/90 border-b border-white/8 shrink-0">
+      <div className="px-3 pt-2 pb-2 bg-[#151827]/90 border-b border-white/8 shrink-0">
         <div className="flex items-baseline justify-between gap-2 mb-1.5">
           <span
-            className={`font-display text-sm sm:text-[15px] font-black tracking-wide truncate ${
+            className={`font-display text-[15px] sm:text-base font-black tracking-wide truncate ${
               run.phaseIndex >= 9
                 ? 'text-[#fda4af] text-glow-crimson'
                 : run.phaseIndex >= 6
@@ -373,7 +377,7 @@ export function BossArena() {
           >
             {currentShell.name}
           </span>
-          <span className="font-mono-num text-xs font-bold text-[#7dd3fc] shrink-0">
+          <span className="font-mono-num text-[12.5px] font-bold text-[#7dd3fc] shrink-0">
             DPS {formatNumber(totalDps, settings.numberMode, true)}/s
             {run.poisonStacks > 0 && (
               <span className="text-[#34d399] font-semibold ml-1.5">
@@ -384,7 +388,7 @@ export function BossArena() {
         </div>
 
         {/* Dual-Layer Delayed HP Bar */}
-        <div className="relative h-4 w-full rounded-sm bg-[#090b12] border border-[#384166] overflow-hidden">
+        <div className="relative h-5 w-full rounded bg-[#090b12] border border-[#384166] overflow-hidden">
           <div
             className="absolute inset-y-0 left-0 bg-[#d97706] transition-all duration-300 ease-out"
             style={{ width: `${hpPct}%` }}
@@ -393,7 +397,7 @@ export function BossArena() {
             className="absolute inset-y-0 left-0 bg-[#f43f5e]"
             style={{ width: `${hpPct}%` }}
           />
-          <div className="relative z-10 h-full flex items-center justify-center text-[11px] font-mono-num font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]">
+          <div className="relative z-10 h-full flex items-center justify-center text-xs font-mono-num font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]">
             {formatNumber(hp, settings.numberMode)} / {formatNumber(maxHp, settings.numberMode)} (
             {hpPct.toFixed(1)}%)
           </div>
@@ -407,7 +411,7 @@ export function BossArena() {
             return (
               <div
                 key={s.phase}
-                className={`h-1 flex-1 rounded-sm transition-colors ${
+                className={`h-1.5 flex-1 rounded-sm transition-colors ${
                   broken
                     ? 'bg-white/12'
                     : current
@@ -443,14 +447,14 @@ export function BossArena() {
           </div>
         )}
 
-        {settings.hitVfxEnabled && shellShatterId > 0 && (
+        {activeVfx && shellShatterId > 0 && (
           <div
             key={`shock-${shellShatterId}`}
             className="pointer-events-none absolute w-40 h-40 rounded-full border-2 border-[#f43f5e] animate-shell-shatter"
           />
         )}
 
-        {settings.hitVfxEnabled &&
+        {activeVfx &&
           clickRipples.map((r) => (
             <div
               key={r.id}
@@ -460,18 +464,18 @@ export function BossArena() {
           ))}
 
         <div
-          className="relative flex items-center justify-center transition-[transform,filter] duration-75"
+          className="relative flex items-center justify-center transition-transform duration-75"
           style={{
             transform:
-              settings.hitVfxEnabled && isHitSquashed
+              activeVfx && isHitSquashed
                 ? `translate3d(${hitOffset.x}px, ${hitOffset.y}px, 0) scale(0.92)`
                 : 'translate3d(0, 0, 0) scale(1)',
-            filter: settings.hitVfxEnabled && isHitSquashed ? 'brightness(1.7)' : 'brightness(1)',
+            filter: activeVfx && isHitSquashed ? 'brightness(1.35)' : 'brightness(1)',
           }}
         >
           <BossSacredGeometry
             phaseIndex={run.phaseIndex}
-            isHitSquashed={settings.hitVfxEnabled && isHitSquashed}
+            isHitSquashed={activeVfx && isHitSquashed}
           />
         </div>
 
@@ -524,15 +528,15 @@ export function BossArena() {
       </div>
 
       {/* Bottom Skill Quick-Cast Bar */}
-      <div className="shrink-0 bg-[#151827] border-t border-[#2e3552] px-3 py-2 space-y-1.5">
-        <div className="flex items-center gap-2">
-          <div className="flex-1 h-1.5 rounded-full bg-[#090b12] border border-[#384166] overflow-hidden">
+      <div className="shrink-0 bg-[#151827] border-t border-[#2e3552] px-3 py-2 space-y-2">
+        <div className="flex items-center gap-2.5">
+          <div className="flex-1 h-2 rounded-full bg-[#090b12] border border-[#384166] overflow-hidden">
             <div
               className="h-full bg-[#38bdf8] transition-all duration-100"
               style={{ width: `${manaPct}%` }}
             />
           </div>
-          <span className="font-mono-num text-[11px] text-[#7dd3fc] shrink-0">
+          <span className="font-mono-num text-xs font-semibold text-[#7dd3fc] shrink-0">
             道力 {Math.floor(run.mana)}/{heroStats.manaCap}
           </span>
         </div>
@@ -547,29 +551,30 @@ export function BossArena() {
             const hasMana = run.mana >= eff.manaCost;
             const ready = unlocked && !onCd && hasMana;
             const reqRealm = REALM_TIERS.find((r) => r.level === cfg.unlockRealm)?.name ?? '';
+            const autoOn = mythicAutoFree ? true : sk.autoCast;
 
             return (
-              <div key={cfg.id} className="flex flex-col gap-0.5">
+              <div key={cfg.id} className="flex flex-col gap-1">
                 <button
                   type="button"
                   onClick={() => castSkill(cfg.id)}
                   disabled={!ready}
                   title={cfg.shortDesc}
-                  className={`relative px-1.5 py-1.5 rounded-md border text-center transition-colors cursor-pointer ${
+                  className={`relative min-h-[46px] px-1.5 py-1.5 rounded-lg border text-center transition-colors cursor-pointer flex flex-col justify-center ${
                     !unlocked
                       ? 'bg-[#0d101b] border-white/8 text-[#64748b] cursor-not-allowed'
                       : active
-                        ? 'bg-[#f59e0b]/20 border-[#fbbf24] text-[#fef08a]'
+                        ? 'bg-[#f59e0b]/22 border-[#fbbf24] text-[#fef08a]'
                         : ready
                           ? 'bg-[#1e2338] border-[#38bdf8]/60 text-[#f1f5f9] hover:bg-[#38bdf8]/20'
                           : 'bg-[#131726] border-[#2e3552] text-[#94a3b8] cursor-not-allowed'
                   }`}
                 >
-                  <div className="text-[11px] font-semibold truncate flex items-center justify-center gap-0.5">
-                    {!unlocked && <Lock className="w-2.5 h-2.5 shrink-0" />}
+                  <div className="text-xs font-bold truncate flex items-center justify-center gap-0.5">
+                    {!unlocked && <Lock className="w-3 h-3 shrink-0" />}
                     <span className="truncate">{cfg.name}</span>
                   </div>
-                  <div className="font-mono-num text-[10px] mt-0.5 truncate">
+                  <div className="font-mono-num text-[11px] mt-0.5 truncate">
                     {!unlocked
                       ? reqRealm.replace('百脉', '').replace('煞气', '').replace('不灭', '')
                       : active
@@ -583,16 +588,20 @@ export function BossArena() {
                 </button>
 
                 {unlocked && canToggleAutoSkill && (
-                  <label className="flex items-center justify-center gap-1 text-[10px] text-[#94a3b8] cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={mythicAutoFree ? true : sk.autoCast}
-                      disabled={mythicAutoFree}
-                      onChange={() => toggleSkillAutoCast(cfg.id)}
-                      className="accent-[#38bdf8] w-3 h-3"
-                    />
-                    <span>自动</span>
-                  </label>
+                  <button
+                    type="button"
+                    disabled={mythicAutoFree}
+                    onClick={() => toggleSkillAutoCast(cfg.id)}
+                    className={`min-h-[30px] rounded-md border text-[11px] font-semibold transition-colors whitespace-nowrap ${
+                      mythicAutoFree
+                        ? 'bg-[#10b981]/18 border-[#34d399]/40 text-[#a7f3d0] cursor-default'
+                        : autoOn
+                          ? 'bg-[#06b6d4]/22 border-[#22d3ee]/60 text-[#67e8f9] cursor-pointer'
+                          : 'bg-[#101322] border-[#2e3552] text-[#94a3b8] hover:text-white cursor-pointer'
+                    }`}
+                  >
+                    {mythicAutoFree ? '永久自动' : autoOn ? '自动：开' : '自动：关'}
+                  </button>
                 )}
               </div>
             );

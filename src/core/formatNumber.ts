@@ -76,10 +76,27 @@ export function calculateBulkUpgrade(
   budget: Decimal,
   maxLevelCap?: number
 ): { count: number; totalCost: Decimal } {
+  if (
+    !Number.isFinite(budget.mantissa) ||
+    Number.isNaN(budget.mantissa) ||
+    !Number.isFinite(effectiveGrowth) ||
+    !Number.isFinite(costReductionMult)
+  ) {
+    return { count: 0, totalCost: new Decimal(0) };
+  }
+
   const exponent = Math.max(0, currentLevel - 1);
   const firstCost = baseCost
     .mul(Decimal.pow(effectiveGrowth, exponent))
     .mul(costReductionMult);
+
+  if (
+    !Number.isFinite(firstCost.mantissa) ||
+    Number.isNaN(firstCost.mantissa) ||
+    firstCost.lte(0)
+  ) {
+    return { count: 0, totalCost: new Decimal(0) };
+  }
 
   const remainingCap =
     maxLevelCap !== undefined ? Math.max(0, maxLevelCap - currentLevel) : 100000;
@@ -92,12 +109,14 @@ export function calculateBulkUpgrade(
       return { count: 0, totalCost: firstCost };
     }
     if (effectiveGrowth <= 1) {
-      const affordable = Math.floor(budget.div(firstCost).toNumber());
+      const rawAffordable = budget.div(firstCost).toNumber();
+      const affordable = Number.isFinite(rawAffordable) ? Math.floor(rawAffordable) : remainingCap;
       const count = Math.max(1, Math.min(affordable, remainingCap));
       return { count, totalCost: firstCost.mul(count) };
     }
     const ratio = budget.mul(effectiveGrowth - 1).div(firstCost).add(1);
-    const n = Math.floor(ratio.log10() / Math.log10(effectiveGrowth));
+    const ratioLog = ratio.log10();
+    const n = Number.isFinite(ratioLog) ? Math.floor(ratioLog / Math.log10(effectiveGrowth)) : 1;
     let count = Math.max(1, Math.min(n, remainingCap));
     let totalCost = firstCost
       .mul(Decimal.pow(effectiveGrowth, count).sub(1))

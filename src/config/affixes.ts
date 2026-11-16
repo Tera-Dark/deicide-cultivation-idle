@@ -427,7 +427,7 @@ export const INNATE_AFFIXES: Record<InnateAffixId, InnateAffixConfig> = {
   sp_max_god: {
     id: 'sp_max_god',
     name: '★【千级共鸣】',
-    description: '场上每有 1 个有效等级 ≥ 500 级的佣兵，全队最终总伤害独立 ×3.0 倍！',
+    description: '场上每有 1 个有效等级 ≥ 500 级的佣兵，全队最终总伤害独立 ×2.0 倍！',
     recommendedFor: '混沌古神嗣推荐',
   },
 };
@@ -448,7 +448,9 @@ export function getAffixEffectiveValue(
   firstAffixRelicLv: number
 ): number {
   const cfg = AFFIXES[inst.id];
-  const tierMult = AFFIX_TIER_META[inst.tier].mult;
+  const tierMeta = AFFIX_TIER_META[inst.tier];
+  if (!cfg || !tierMeta) return 0;
+  const tierMult = tierMeta.mult;
   const slot5Boost = isSlot5Unlocked ? 1.5 : 1.0;
   const innateBoost = hasInnateBoost ? 2.0 : 1.0;
   const relicSlotBoost = slotIdx <= 3 ? 1 + 0.25 * firstAffixRelicLv : 1.0;
@@ -457,6 +459,7 @@ export function getAffixEffectiveValue(
 
 export function formatAffixValueText(id: AffixId, val: number): string {
   const cfg = AFFIXES[id];
+  if (!cfg) return String(Math.round(val));
   if (cfg.unitKind === 'sec') {
     return `${val.toFixed(2)}`;
   }
@@ -470,6 +473,7 @@ export function formatAffixValueText(id: AffixId, val: number): string {
 
 export function formatAffixShortBadgeValue(id: AffixId, val: number): string {
   const cfg = AFFIXES[id];
+  if (!cfg) return `+${Math.round(val)}%`;
   if (cfg.unitKind === 'sec') {
     return `-${val.toFixed(2)}s`;
   }
@@ -489,6 +493,7 @@ export function formatAffixDescription(
   firstAffixRelicLv: number
 ): string {
   const cfg = AFFIXES[inst.id];
+  if (!cfg) return '未知道纹词缀';
   const val = getAffixEffectiveValue(
     inst,
     slotIdx,
@@ -522,6 +527,39 @@ export function rollAffixTier(affixLuckRelicLv: number, forceHighTier = false): 
     if (r <= 0) return tier;
   }
   return 'white';
+}
+
+export const AFFIX_TIER_ORDER: AffixTier[] = ['white', 'green', 'blue', 'purple', 'gold'];
+
+export function getAffixTierRates(affixLuckRelicLv: number): {
+  tier: AffixTier;
+  meta: (typeof AFFIX_TIER_META)[AffixTier];
+  basePct: number;
+  effectivePct: number;
+}[] {
+  const luckMult = 1 + 0.06 * affixLuckRelicLv;
+  const baseWeights: Record<AffixTier, number> = {
+    white: AFFIX_TIER_META.white.weight,
+    green: AFFIX_TIER_META.green.weight,
+    blue: AFFIX_TIER_META.blue.weight,
+    purple: AFFIX_TIER_META.purple.weight,
+    gold: AFFIX_TIER_META.gold.weight,
+  };
+  const effWeights: Record<AffixTier, number> = {
+    white: AFFIX_TIER_META.white.weight,
+    green: AFFIX_TIER_META.green.weight,
+    blue: AFFIX_TIER_META.blue.weight,
+    purple: AFFIX_TIER_META.purple.weight * luckMult,
+    gold: AFFIX_TIER_META.gold.weight * luckMult,
+  };
+  const baseSum = AFFIX_TIER_ORDER.reduce((s, t) => s + baseWeights[t], 0);
+  const effSum = AFFIX_TIER_ORDER.reduce((s, t) => s + effWeights[t], 0);
+  return AFFIX_TIER_ORDER.map((tier) => ({
+    tier,
+    meta: AFFIX_TIER_META[tier],
+    basePct: (baseWeights[tier] / baseSum) * 100,
+    effectivePct: (effWeights[tier] / effSum) * 100,
+  }));
 }
 
 export function rollRandomInnateAffix(exclude?: InnateAffixId): InnateAffixId {

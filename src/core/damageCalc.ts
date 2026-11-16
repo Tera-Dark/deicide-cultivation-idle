@@ -5,7 +5,8 @@ import {
   rollRandomAffixId,
 } from '../config/affixes';
 import { ARCHETYPES } from '../config/archetypes';
-import { BOSS_SHELLS, TRIBULATION_MAP } from '../config/bosses';
+import { BOSS_SHELLS, TRIBULATIONS, TRIBULATION_MAP } from '../config/bosses';
+import { RELICS } from '../config/relics';
 import {
   BASE_HERO_ATK,
   BASE_MANA_CAP,
@@ -20,12 +21,17 @@ import type {
   AffixId,
   MercenarySlotState,
   MetaState,
+  RelicId,
   RunState,
   SkillId,
   SpeedrunRank,
   TribulationId,
 } from '../types/game';
 import { toDecimal } from './formatNumber';
+
+export function getRelicTotalLv(meta: MetaState, relicId: RelicId): number {
+  return (meta.relicLevels[relicId] ?? 0) + (meta.relicDropLevels?.[relicId] ?? 0);
+}
 
 export function getTribulationConfig(id: TribulationId) {
   return TRIBULATION_MAP[id] ?? TRIBULATION_MAP.tier_1;
@@ -34,11 +40,11 @@ export function getTribulationConfig(id: TribulationId) {
 export function getBossTotalHp(tribulationId: TribulationId, meta: MetaState): Decimal {
   const trib = getTribulationConfig(tribulationId);
   let total = toDecimal(trib.baseHp);
-  // NG+ scaling on tier_10: each clear multiplies BOSS HP by 1e15
+  // NG+ scaling on tier_10: each clear multiplies BOSS HP by 1e4
   if (tribulationId === 'tier_10' && meta.ngPlusCount > 0) {
-    total = total.mul(Decimal.pow(1e15, meta.ngPlusCount));
+    total = total.mul(Decimal.pow(1e4, meta.ngPlusCount));
   }
-  const weakenLv = meta.relicLevels.rel_r_boss_hp ?? 0;
+  const weakenLv = getRelicTotalLv(meta, 'rel_r_boss_hp');
   const weakenMult = Math.max(0.1, 1 - 0.015 * weakenLv);
   return total.mul(weakenMult).max(100);
 }
@@ -78,8 +84,8 @@ export function getRealmInfo(realmLevel: number): {
     name: `古神道躯·${extra}重`,
     reqStones: new Decimal(2e8).mul(Decimal.pow(200, extra)),
     reqClicks: 0,
-    multiplier: new Decimal(200).mul(Decimal.pow(5, extra)),
-    rewardNote: '古神道躯突破：全伤害额外 ×5',
+    multiplier: new Decimal(120).mul(Decimal.pow(4, extra)),
+    rewardNote: '古神道躯突破：全伤害额外 ×4',
   };
 }
 
@@ -87,11 +93,11 @@ export function getRealmMultiplier(realmLevel: number): Decimal {
   if (realmLevel < REALM_TIERS.length) {
     return new Decimal(REALM_TIERS[realmLevel].multiplier);
   }
-  return new Decimal(200).mul(Decimal.pow(5, realmLevel - 4));
+  return new Decimal(120).mul(Decimal.pow(4, realmLevel - 4));
 }
 
 export function getCostReductionMult(meta: MetaState): number {
-  const lv = meta.relicLevels.rel_c_cost_down ?? 0;
+  const lv = getRelicTotalLv(meta, 'rel_c_cost_down');
   return Math.max(0.1, 1 - 0.015 * lv);
 }
 
@@ -189,7 +195,7 @@ export function getMercCheapDiscount(
   meta: MetaState
 ): number {
   const s5 = isSlot5Active(mercs);
-  const firstAffixRelicLv = meta.relicLevels.rel_m_first_affix ?? 0;
+  const firstAffixRelicLv = getRelicTotalLv(meta, 'rel_m_first_affix');
   const raw = sumMercActiveAffixRatio(slot, 'af_t2_cheap', s5, firstAffixRelicLv);
   return Math.min(0.75, raw);
 }
@@ -218,18 +224,22 @@ export function getGlobalMult(
   }
 
   const slot5GlobalMult = s5
-    ? Decimal.pow(1.5, Math.floor(totalMercEffLevels / 100))
+    ? Decimal.pow(1.18, Math.floor(totalMercEffLevels / 100))
     : new Decimal(1);
-  const maxGodMult = anyMaxGod ? Decimal.pow(3, countEffGte500) : new Decimal(1);
+  const maxGodMult = anyMaxGod ? Decimal.pow(2.0, countEffGte500) : new Decimal(1);
   const stoneLog10 = Math.max(0, Math.floor(toDecimal(run.spiritStones).max(1).log10()));
   const goldEmpireMult = anyGoldEmpire ? 1 + stoneLog10 * 0.5 : 1;
 
-  const infDmgLv = meta.relicLevels.rel_e_inf_dmg ?? 0;
-  const finalMultLv = meta.relicLevels.rel_m_final_mult ?? 0;
-  const omniBaseLv = meta.relicLevels.rel_m_omni_base ?? 0;
+  const infDmgCrystalLv = meta.relicLevels.rel_e_inf_dmg ?? 0;
+  const infDmgDropLv = meta.relicDropLevels?.rel_e_inf_dmg ?? 0;
+  const finalMultCrystalLv = meta.relicLevels.rel_m_final_mult ?? 0;
+  const finalMultDropLv = meta.relicDropLevels?.rel_m_final_mult ?? 0;
+  const omniBaseLv = getRelicTotalLv(meta, 'rel_m_omni_base');
 
-  const relicGlobalMult = Decimal.pow(1.25, infDmgLv)
-    .mul(Decimal.pow(2, finalMultLv))
+  const relicGlobalMult = Decimal.pow(1.12, infDmgCrystalLv)
+    .mul(Decimal.pow(1.02, infDmgDropLv))
+    .mul(Decimal.pow(1.5, finalMultCrystalLv))
+    .mul(Decimal.pow(1.06, finalMultDropLv))
     .mul(1 + unlockedCount * 0.2 * omniBaseLv);
 
   const trib = getTribulationConfig(run.tribulationId);
@@ -250,8 +260,8 @@ export function getHeroGrowthPerClick(
   meta: MetaState
 ): Decimal {
   const L = Math.max(1, run.enlightenmentLevel);
-  const flatRelic = meta.relicLevels.rel_c_click_flat ?? 0;
-  const firstAffixRelicLv = meta.relicLevels.rel_m_first_affix ?? 0;
+  const flatRelic = getRelicTotalLv(meta, 'rel_c_click_flat');
+  const firstAffixRelicLv = getRelicTotalLv(meta, 'rel_m_first_affix');
   const hGrowAffix = sumAllActiveAffixRatio(mercs, 'af_t2_h_grow', firstAffixRelicLv);
   const base = 1 + (L - 1) * (1 + Math.floor(L / 10) * 1.5) + 2 * flatRelic;
   return new Decimal(base).mul(1 + hGrowAffix);
@@ -264,11 +274,11 @@ export function getSkillEffectiveValues(
   meta: MetaState
 ) {
   const cfg = SKILLS.find((s) => s.id === skillId)!;
-  const cdLv = meta.relicLevels.rel_r_skill_cd ?? 0;
-  const durLv = meta.relicLevels.rel_r_skill_dur ?? 0;
-  const autoSkillLv = meta.relicLevels.rel_m_auto_skill ?? 0;
-  const thunderLv = meta.relicLevels.rel_r_thunder ?? 0;
-  const firstAffixRelicLv = meta.relicLevels.rel_m_first_affix ?? 0;
+  const cdLv = getRelicTotalLv(meta, 'rel_r_skill_cd');
+  const durLv = getRelicTotalLv(meta, 'rel_r_skill_dur');
+  const autoSkillLv = getRelicTotalLv(meta, 'rel_m_auto_skill');
+  const thunderLv = getRelicTotalLv(meta, 'rel_r_thunder');
+  const firstAffixRelicLv = getRelicTotalLv(meta, 'rel_m_first_affix');
 
   const skillPowerMult = 1 + 0.2 * autoSkillLv;
   const cooldown = cfg.baseCooldown * Math.max(0.2, 1 - 0.016 * cdLv);
@@ -300,7 +310,7 @@ export function getHeroStats(
   const trib = getTribulationConfig(run.tribulationId);
   const globalMult = getGlobalMult(run, mercs, meta);
   const realmMult = getRealmMultiplier(run.realmLevel);
-  const firstAffixRelicLv = meta.relicLevels.rel_m_first_affix ?? 0;
+  const firstAffixRelicLv = getRelicTotalLv(meta, 'rel_m_first_affix');
 
   const heroBuffAffix = run.heroBuffStacks.reduce(
     (sum, s) => (s.expiresAt > nowMs ? sum + s.val : sum),
@@ -308,8 +318,8 @@ export function getHeroStats(
   );
   const heroAtkAffix = sumAllActiveAffixRatio(mercs, 'af_t1_hero_a', firstAffixRelicLv);
   const heroCritAffix = sumAllActiveAffixRatio(mercs, 'af_t1_hero_c', firstAffixRelicLv);
-  const clickMultRelic = meta.relicLevels.rel_c_click_mult ?? 0;
-  const critDmgRelic = meta.relicLevels.rel_r_crit_dmg ?? 0;
+  const clickMultRelic = getRelicTotalLv(meta, 'rel_c_click_mult');
+  const critDmgRelic = getRelicTotalLv(meta, 'rel_r_crit_dmg');
 
   const baseHero = new Decimal(BASE_HERO_ATK).add(toDecimal(run.accumulatedAtk));
   // HeroBasePower excludes GlobalMult so af_t3_hero_ln does not double-count GlobalMult
@@ -327,17 +337,17 @@ export function getHeroStats(
   // Mana & Regen
   const manaCap =
     BASE_MANA_CAP +
-    4 * (meta.relicLevels.rel_c_mana_cap ?? 0) +
+    4 * getRelicTotalLv(meta, 'rel_c_mana_cap') +
     (run.realmLevel >= 4 ? 50 : 0);
   const manaRegenAffix = sumAllActiveAffixRaw(mercs, 'af_t1_mana_r', firstAffixRelicLv);
   const baseRegen = BASE_MANA_REGEN + (run.realmLevel >= 4 ? 1.5 : 0) + manaRegenAffix;
   const manaRegenPerSec = baseRegen * (trib.debuff.manaRegenMult ?? 1);
   const manualClickManaGain =
-    (BASE_MANUAL_CLICK_MANA + 0.05 * (meta.relicLevels.rel_c_mana_click ?? 0)) *
+    (BASE_MANUAL_CLICK_MANA + 0.05 * getRelicTotalLv(meta, 'rel_c_mana_click')) *
     (trib.debuff.manaRegenMult ?? 1);
 
   // Puppet (Auto-clicker)
-  const puppetRelicLv = meta.relicLevels.rel_c_puppet_spd ?? 0;
+  const puppetRelicLv = getRelicTotalLv(meta, 'rel_c_puppet_spd');
   const puppetAffix = sumAllActiveAffixRaw(mercs, 'af_t2_puppet', firstAffixRelicLv);
   let puppetRate =
     run.puppetLevel > 0
@@ -377,11 +387,9 @@ export function getMercPanelBaseDirect(
   const arch = ARCHETYPES[slot.archetype];
   const effLv = getEffectiveLevel(slot);
   const milestoneCount = LEVEL_SLOT_THRESHOLDS.filter((m) => effLv >= m).length;
-  const milestoneMult = Decimal.pow(2, Math.floor(effLv / 25)).mul(
-    Decimal.pow(4, milestoneCount)
-  );
-  return new Decimal(25 * arch.dmgFactor * effLv)
-    .mul(Decimal.pow(1.065, effLv))
+  const milestoneMult = Decimal.pow(2.0, milestoneCount);
+  return new Decimal(4 * arch.dmgFactor * effLv)
+    .mul(Decimal.pow(1.018, effLv))
     .add(sharedHeroGrowth)
     .mul(milestoneMult);
 }
@@ -441,9 +449,9 @@ export function getMercenaryComputedStats(
   const arch = ARCHETYPES[slot.archetype];
   const trib = getTribulationConfig(run.tribulationId);
   const s5 = isSlot5Active(mercs);
-  const firstAffixRelicLv = meta.relicLevels.rel_m_first_affix ?? 0;
-  const critDmgRelic = meta.relicLevels.rel_r_crit_dmg ?? 0;
-  const arrayRelicLv = meta.relicLevels.rel_r_array_buff ?? 0;
+  const firstAffixRelicLv = getRelicTotalLv(meta, 'rel_m_first_affix');
+  const critDmgRelic = getRelicTotalLv(meta, 'rel_r_crit_dmg');
+  const arrayRelicLv = getRelicTotalLv(meta, 'rel_r_array_buff');
   const sharedHeroGrowth = toDecimal(run.sharedHeroGrowth);
 
   const sumSelf = (id: AffixId) =>
@@ -526,13 +534,13 @@ export function getMercenaryComputedStats(
   // Step 5: Slot 4 Aura (Slot 1~3) + Specialty Relics + Hero Link
   const slot4AuraMult =
     mercs[3]?.unlocked && mercs[3].level > 0 && slotIndex <= 2
-      ? 1 + slot4EffLv * 0.15 * (1 + 0.08 * arrayRelicLv)
+      ? 1 + slot4EffLv * 0.06 * (1 + 0.08 * arrayRelicLv)
       : 1;
 
   let mercRelicMult = 1.0;
-  if (slotIndex === 0) mercRelicMult = 1 + 0.5 * (meta.relicLevels.rel_r_sword_dmg ?? 0);
-  else if (slotIndex === 1) mercRelicMult = 1 + 0.5 * (meta.relicLevels.rel_r_tentacle ?? 0);
-  else if (slotIndex === 2) mercRelicMult = 1 + 0.7 * (meta.relicLevels.rel_r_cannon_dmg ?? 0);
+  if (slotIndex === 0) mercRelicMult = 1 + 0.4 * getRelicTotalLv(meta, 'rel_r_sword_dmg');
+  else if (slotIndex === 1) mercRelicMult = 1 + 0.4 * getRelicTotalLv(meta, 'rel_r_tentacle');
+  else if (slotIndex === 2) mercRelicMult = 1 + 0.55 * getRelicTotalLv(meta, 'rel_r_cannon_dmg');
 
   const heroLinkAdd = heroBasePower.mul(sumSelf('af_t3_hero_ln'));
 
@@ -582,21 +590,19 @@ export function getMercenaryComputedStats(
 
   const expectedSingleHit = rawDmg.mul(1 + critRate * (critDmg - 1)).add(skill4Bonus);
 
-  // Poison panel per stack per second for Slot 2 (uses poisonFactor 0.8)
+  // Poison panel per stack per second for Slot 2 (uses poisonFactor 0.45)
   let poisonPanelPerSec = new Decimal(0);
   if (slotIndex === 1) {
     const milestoneCount = LEVEL_SLOT_THRESHOLDS.filter((m) => effLevel >= m).length;
-    const milestoneMult = Decimal.pow(2, Math.floor(effLevel / 25)).mul(
-      Decimal.pow(4, milestoneCount)
-    );
-    const poisonBasePanel = new Decimal(25 * (arch.poisonFactor ?? 0.8) * effLevel)
-      .mul(Decimal.pow(1.065, effLevel))
+    const milestoneMult = Decimal.pow(2.0, milestoneCount);
+    const poisonBasePanel = new Decimal(4 * (arch.poisonFactor ?? 0.45) * effLevel)
+      .mul(Decimal.pow(1.018, effLevel))
       .add(sharedHeroGrowth)
       .mul(milestoneMult);
 
     const poisonAffixSum = sumAllActiveAffixRatio(mercs, 'af_t1_poison', firstAffixRelicLv);
     const tentSymbiosisSum = sumAllActiveAffixRatio(mercs, 'af_t3_tent_s', firstAffixRelicLv);
-    const tentRelic = 1 + 0.5 * (meta.relicLevels.rel_r_tentacle ?? 0);
+    const tentRelic = 1 + 0.4 * getRelicTotalLv(meta, 'rel_r_tentacle');
 
     poisonPanelPerSec = poisonBasePanel
       .mul(1 + poisonAffixSum)
@@ -669,13 +675,13 @@ export function getPoisonTickExpectedDamage(
     globalMult
   );
   const rawPoison = st2.poisonPanelPerSec.mul(run.poisonStacks);
-  const dotCritLv = meta.relicLevels.rel_e_dot_crit ?? 0;
+  const dotCritLv = getRelicTotalLv(meta, 'rel_e_dot_crit');
   if (dotCritLv <= 0) {
     return { rawPoison, critChance: 0, critDmg: 1, expectedPoison: rawPoison };
   }
   const critChance = Math.min(1, 0.3 + 0.04 * dotCritLv);
   const critDmg =
-    2.0 + 0.4 * dotCritLv + 0.15 * (meta.relicLevels.rel_r_crit_dmg ?? 0);
+    2.0 + 0.4 * dotCritLv + 0.15 * getRelicTotalLv(meta, 'rel_r_crit_dmg');
   const expectedPoison = rawPoison.mul(1 + critChance * (critDmg - 1));
   return { rawPoison, critChance, critDmg, expectedPoison };
 }
@@ -685,16 +691,16 @@ export function getSpiritStoneMultiplier(
   run: RunState,
   meta: MetaState
 ): number {
-  const firstAffixRelicLv = meta.relicLevels.rel_m_first_affix ?? 0;
-  const arrayRelicLv = meta.relicLevels.rel_r_array_buff ?? 0;
+  const firstAffixRelicLv = getRelicTotalLv(meta, 'rel_m_first_affix');
+  const arrayRelicLv = getRelicTotalLv(meta, 'rel_r_array_buff');
   const slot4Unlocked = Boolean(mercs[3]?.unlocked && mercs[3].level > 0);
   const slot4EffLv = slot4Unlocked ? getEffectiveLevel(mercs[3]) : 0;
   const slot4GoldBonus = slot4Unlocked
-    ? (1.5 + slot4EffLv * 0.05) * (1 + 0.08 * arrayRelicLv)
+    ? (1.2 + slot4EffLv * 0.04) * (1 + 0.08 * arrayRelicLv)
     : 0;
 
   const goldAffix = sumAllActiveAffixRatio(mercs, 'af_t2_gold', firstAffixRelicLv);
-  const stoneRelicLv = meta.relicLevels.rel_c_stone_gain ?? 0;
+  const stoneRelicLv = getRelicTotalLv(meta, 'rel_c_stone_gain');
 
   // StagePenalty: Phase 1~3 = 1.0; Phase 4~6 = 0.6; Phase 7~8 = 0.3; Phase 9~10 = 0.1
   const stagePenalty =
@@ -704,8 +710,8 @@ export function getSpiritStoneMultiplier(
   const tierDebuff = trib.debuff.stoneMult ?? 1;
 
   return (
-    0.5 *
-    (1 + slot4GoldBonus + goldAffix + 0.2 * stoneRelicLv) *
+    0.15 *
+    (1 + slot4GoldBonus + goldAffix + 0.15 * stoneRelicLv) *
     stagePenalty *
     tierDebuff
   );
@@ -720,12 +726,58 @@ export function evaluateSpeedrunRank(
   bonusRelicLevels: number;
 } {
   const sec = clearTimeMs / 1000;
-  const highTier = tribOrder >= 6;
-  if (sec < 15) return { rank: 'SSS', crystalMult: 6.0, bonusRelicLevels: highTier ? 10 : 0 };
-  if (sec < 180) return { rank: 'S', crystalMult: 3.5, bonusRelicLevels: highTier ? 6 : 0 };
-  if (sec < 600) return { rank: 'A', crystalMult: 2.0, bonusRelicLevels: highTier ? 3 : 0 };
-  if (sec < 1800) return { rank: 'B', crystalMult: 1.5, bonusRelicLevels: highTier ? 1 : 0 };
+  const topTier = tribOrder >= 9;
+  if (sec < 15) return { rank: 'SSS', crystalMult: 6.0, bonusRelicLevels: topTier ? 1 : 0 };
+  if (sec < 180) return { rank: 'S', crystalMult: 3.5, bonusRelicLevels: topTier ? 1 : 0 };
+  if (sec < 600) return { rank: 'A', crystalMult: 2.0, bonusRelicLevels: 0 };
+  if (sec < 1800) return { rank: 'B', crystalMult: 1.5, bonusRelicLevels: 0 };
   return { rank: 'C', crystalMult: 1.0, bonusRelicLevels: 0 };
+}
+
+export function getTotalRelicLevels(meta: MetaState): number {
+  let total = 0;
+  for (const r of RELICS) {
+    total += getRelicTotalLv(meta, r.id);
+  }
+  return total;
+}
+
+export function getNextTribulationUnlockState(meta: MetaState): {
+  nextTrib: (typeof TRIBULATIONS)[number] | null;
+  prevTribId: TribulationId | null;
+  prevClears: number;
+  reqClears: number;
+  totalRelicLevels: number;
+  reqRelicLevels: number;
+  canUnlock: boolean;
+} {
+  const nextOrder = meta.highestUnlockedOrder + 1;
+  const totalRelicLevels = getTotalRelicLevels(meta);
+  if (nextOrder > TRIBULATIONS.length) {
+    return {
+      nextTrib: null,
+      prevTribId: null,
+      prevClears: 0,
+      reqClears: 0,
+      totalRelicLevels,
+      reqRelicLevels: 0,
+      canUnlock: false,
+    };
+  }
+  const nextTrib = TRIBULATIONS.find((t) => t.order === nextOrder)!;
+  const prevTrib = TRIBULATIONS.find((t) => t.order === nextOrder - 1)!;
+  const prevClears = meta.clearCounts?.[prevTrib.id] ?? 0;
+  return {
+    nextTrib,
+    prevTribId: prevTrib.id,
+    prevClears,
+    reqClears: nextTrib.unlockReqPrevClears,
+    totalRelicLevels,
+    reqRelicLevels: nextTrib.unlockReqRelicLevels,
+    canUnlock:
+      prevClears >= nextTrib.unlockReqPrevClears &&
+      totalRelicLevels >= nextTrib.unlockReqRelicLevels,
+  };
 }
 
 export { rollAffixTier, rollRandomAffixId };
