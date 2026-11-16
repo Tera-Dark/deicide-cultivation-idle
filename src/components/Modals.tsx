@@ -1,11 +1,14 @@
 import { useState } from 'react';
 import {
+  Bot,
+  Crown,
   AlertTriangle,
   ArrowRight,
   BookOpen,
   Check,
   Copy,
   Dices,
+  Film,
   Lock,
   LockOpen,
   Play,
@@ -27,6 +30,7 @@ import {
 import { ARCHETYPES } from '../config/archetypes';
 import { TRIBULATIONS } from '../config/bosses';
 import { LEVEL_SLOT_NAMES, LEVEL_SLOT_THRESHOLDS } from '../config/constants';
+import { MERC_TYPOGRAPHY, RichLoreText } from '../config/highlights';
 import {
   evaluateSpeedrunRank,
   getBossTotalHp,
@@ -42,88 +46,255 @@ import type { TutorialNodeId } from '../types/game';
 import { ArchetypeIcon } from './ArchetypeIcon';
 import { PhaseBreakSigilIcon } from './CultivationIcons';
 
-const INTRO_SLIDES = [
+interface IntroAct {
+  actCode: string;
+  title: string;
+  titleClass: string;
+  glowGradient: string;
+  accentColor: string;
+  lines: string[];
+}
+
+const INTRO_ACTS: IntroAct[] = [
   {
-    title: '【伪善之天】',
-    body: '凡人皆言，吐纳灵气、苦修飞升即可得道长生。直到你修成天眼，刺破云端，看清了苍穹之上的恐怖真相——',
+    actCode: '第 一 幕 · 伪 善 苍 穹',
+    title: '伪善之天',
+    titleClass: 'text-[#e0f2fe] text-glow-sky',
+    glowGradient:
+      'radial-gradient(circle at 50% 42%, rgba(56,189,248,0.18) 0%, rgba(14,116,144,0.08) 42%, transparent 72%)',
+    accentColor: 'via-[#38bdf8]/65',
+    lines: [
+      '凡人皆言，吐纳灵气、苦修飞升即可得道长生。',
+      '直到你修成天眼，刺破九重云端——',
+      '终于看清了苍穹尽头那令万灵窒息的恐怖真相。',
+    ],
   },
   {
-    title: '【天道古神】',
-    body: '所谓的“天道”，竟是一尊盘踞在星海深处、由高维法则构成的【不可名状古神】！众生万年苦修化作的灵气，皆是祂沉睡中的食粮。',
+    actCode: '第 二 幕 · 诡 谲 真 相',
+    title: '天道古神',
+    titleClass: 'text-[#fda4af] text-glow-crimson',
+    glowGradient:
+      'radial-gradient(circle at 50% 42%, rgba(244,63,94,0.19) 0%, rgba(168,85,247,0.12) 45%, transparent 74%)',
+    accentColor: 'via-[#f43f5e]/65',
+    lines: [
+      '世间所谓的“天道”，竟是一尊盘踞在星海深处、',
+      '由高维法则血肉编织而成的【不可名状古神】！',
+      '万古众生苦修化作的灵气，不过是祂沉睡中的食粮。',
+    ],
   },
   {
-    title: '【亵渎道胎 · 弑神夺果】',
-    body: '今日，你自斩凡根，觉醒【弑神道胎】！直面古神本源，你的每一次叩击都将强行剥离祂的【灵石】并永久化为自身修为！召集五大本命护法，轰碎十重躯壳，窃取古神道果！',
+    actCode: '第 三 幕 · 异 端 觉 醒',
+    title: '弑神夺果',
+    titleClass: 'text-[#fef08a] text-glow-gold',
+    glowGradient:
+      'radial-gradient(circle at 50% 42%, rgba(251,191,36,0.18) 0%, rgba(244,63,94,0.16) 46%, transparent 74%)',
+    accentColor: 'via-[#fbbf24]/70',
+    lines: [
+      '今日，你自斩凡根，唤醒体内禁忌的【弑神道胎】！',
+      '每次叩击都将强行剥离古神【灵石】，永久化为自身修为；',
+      '召集【五大本命护法】，轰碎【十重躯壳】，窃取【古神道果】！',
+    ],
   },
 ];
 
-const TUTORIAL_CONTENT: Record<TutorialNodeId, { title: string; body: string }> = {
+interface TutorialCinemaMeta {
+  tag: string;
+  title: string;
+  titleClass: string;
+  glowGradient: string;
+  borderClass: string;
+  lines: string[];
+  emblem: 'puppet' | 'merc_sword' | 'affix' | 'relic';
+}
+
+const TUTORIAL_CONTENT: Record<TutorialNodeId, TutorialCinemaMeta> = {
   tut_phase1: {
+    tag: '破 壳 机 缘 · 灵 枢 认 主',
     title: '躯壳初裂 · 傀儡认主',
-    body: '你轰碎了古神最外层的腐朽外皮，获赠【80 灵石 & 2 词缀石】！主角面板已解锁【机关傀儡】，仅需 60 灵石即可开启全自动点击！',
+    titleClass: 'text-[#6ee7b7] text-glow-emerald',
+    glowGradient:
+      'radial-gradient(circle at 50% 38%, rgba(16,185,129,0.22) 0%, rgba(6,182,212,0.08) 46%, transparent 74%)',
+    borderClass: 'border-[#34d399]/50',
+    emblem: 'puppet',
+    lines: [
+      '你轰碎了古神最外层的腐朽外皮，获赠【80 灵石 & 2 词缀石】！',
+      '主角面板已解锁【机关傀儡】，仅需 60 灵石即可激活，开启全自动叩击！',
+    ],
   },
   tut_merc1: {
-    title: '护法降临 · 青冥剑侍参上',
-    body: '你解救出第一位固定本命护法【1号位：青冥剑侍】（自带连斩与御剑双天赋，以及 1 个神晶本命词缀槽）！每位护法从 10 级升至 1000 级可逐层点亮 10 个专属词缀槽，且每次到达词缀槽节点自身伤害直接 ×4 倍！',
+    tag: '本 命 护 法 · 剑 意 觉醒',
+    title: '青冥剑侍 参上',
+    titleClass: 'text-[#22d3ee] text-glow-cyan',
+    glowGradient:
+      'radial-gradient(circle at 50% 38%, rgba(6,182,212,0.24) 0%, rgba(56,189,248,0.1) 46%, transparent 74%)',
+    borderClass: 'border-[#22d3ee]/55',
+    emblem: 'merc_sword',
+    lines: [
+      '你从虚空剑匣中解救出第一位固定护法——【1号位：青冥剑侍】！',
+      '自带连斩与御剑随心双天赋，并附带 1 个永久的【先天本命神通】槽位。',
+      '护法从 10 级升至 1000 级可逐层点亮 10 个词缀槽，且每达节点伤害直接 ×4 倍！',
+    ],
   },
   tut_affix: {
-    title: '道纹觉醒 · 十槽词缀开启',
-    body: '护法已达 10 级，成功点亮第 1 重等级词缀槽！点击护法卡片打开【道纹洗练面板】，消耗【词缀石】即可从 48 种三六九等词缀中洗练神技（10 次必出极品/仙品，支持先看后换，重开 100% 永久保留）！',
+    tag: '道 纹 显 圣 · 万 法 洗 炼',
+    title: '道纹觉醒 · 十槽开启',
+    titleClass: 'text-[#fde047] text-glow-gold',
+    glowGradient:
+      'radial-gradient(circle at 50% 38%, rgba(251,191,36,0.22) 0%, rgba(245,158,11,0.08) 46%, transparent 74%)',
+    borderClass: 'border-[#fbbf24]/55',
+    emblem: 'affix',
+    lines: [
+      '护法已达 Lv.10，成功点亮第 1 重等级道纹词缀槽！',
+      '点击护法卡片打开【道纹洗练面板】，消耗【词缀石】即可洗练 48 种三六九等神技！',
+      '每 10 次洗练必出极品或仙品词缀，支持先看后换，重开 100% 永久保留！',
+    ],
   },
   tut_tier1_win: {
-    title: '弑神功成 · 遗物圣殿开启',
-    body: '恭喜轰杀古神第一尊分身，获得 15 颗【神晶】！建议先去【五人佣兵】面板花 10 神晶解锁 2 号位【深渊触母】开启叠毒引爆流，再去【古神遗物】面板抽取永久遗物！',
+    tag: '弑 神 初 捷 · 圣 殿 洞 开',
+    title: '劫一功成 · 遗物圣殿',
+    titleClass: 'text-[#d8b4fe] text-glow-purple',
+    glowGradient:
+      'radial-gradient(circle at 50% 38%, rgba(168,85,247,0.24) 0%, rgba(251,191,36,0.1) 46%, transparent 74%)',
+    borderClass: 'border-[#c084fc]/55',
+    emblem: 'relic',
+    lines: [
+      '恭喜轰杀古神第一尊分身，获赠【15 颗】【神晶】！',
+      '建议先前往五人佣兵面板花费 10 神晶唤醒【2号位：深渊触母】开启高频毒爆流，',
+      '随后踏入【遗物圣殿】，凝练永久传承的【古神遗物】！',
+    ],
   },
 };
 
 export function IntroModal() {
   const { meta, completeIntro } = useGameStore();
   const [step, setStep] = useState(0);
+  const [skipStaggerForStep, setSkipStaggerForStep] = useState<number | null>(null);
 
   if (meta.hasSeenIntro) return null;
 
-  const slide = INTRO_SLIDES[step];
-  const isLast = step === INTRO_SLIDES.length - 1;
+  const act = INTRO_ACTS[step];
+  const isLast = step === INTRO_ACTS.length - 1;
+  const instant = skipStaggerForStep === step;
+
+  const handleNext = () => {
+    if (isLast) {
+      completeIntro();
+    } else {
+      setStep((s) => s + 1);
+      setSkipStaggerForStep(null);
+    }
+  };
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/82 backdrop-blur-sm p-3"
+      className="fixed inset-0 z-50 flex flex-col justify-between bg-[#04050a] text-[#f1efe9] overflow-hidden animate-cinema-veil select-none"
       role="dialog"
       aria-modal="true"
       aria-labelledby="intro-title"
+      onClick={() => {
+        if (!instant) setSkipStaggerForStep(step);
+      }}
     >
-      <div className="w-full max-w-[420px] bg-[#151827] border border-[#38bdf8]/45 rounded-xl p-5 shadow-2xl space-y-4">
-        <div className="flex items-center justify-between gap-2">
-          <div className="inline-flex items-center gap-1.5 text-[11px] font-mono-num text-[#7dd3fc]">
-            <PhaseBreakSigilIcon className="w-3.5 h-3.5" />
-            <span>序章 {step + 1} / 3</span>
-          </div>
-          <button
-            type="button"
-            onClick={completeIntro}
-            className="text-[11px] text-[#94a3b8] hover:text-white px-2 py-0.5 rounded border border-white/10 cursor-pointer"
-          >
-            跳过
-          </button>
+      {/* Breathing Void Aura & Subtle Celestial Sigil Backdrop */}
+      <div
+        className="pointer-events-none absolute inset-0 animate-cinema-breathe transition-all duration-1000"
+        style={{ backgroundImage: act.glowGradient }}
+      />
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-[0.055]">
+        <PhaseBreakSigilIcon className="w-[380px] h-[380px] sm:w-[460px] sm:h-[460px] animate-sigil-cw" />
+      </div>
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage:
+            'radial-gradient(ellipse at center, transparent 34%, rgba(3,4,8,0.92) 100%)',
+        }}
+      />
+
+      {/* Top Subtle Cinema Header */}
+      <header className="relative z-10 flex items-center justify-between px-5 sm:px-8 pt-5 pb-2 max-w-[680px] w-full mx-auto">
+        <div className="inline-flex items-center gap-2 text-[11px] font-mono-num tracking-[0.22em] text-[#7dd3fc]/80">
+          <PhaseBreakSigilIcon className="w-3.5 h-3.5 text-[#38bdf8]" />
+          <span>序章 · {step + 1} / 3</span>
+        </div>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            completeIntro();
+          }}
+          className="text-xs tracking-[0.14em] text-[#94a3b8] hover:text-[#f8fafc] px-3 py-1 rounded border border-white/12 hover:border-white/30 bg-white/[0.03] transition-colors cursor-pointer"
+        >
+          跳过序章
+        </button>
+      </header>
+
+      {/* Center Film-Grade Editorial Typography Stage */}
+      <main
+        key={`act-${step}`}
+        className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 sm:px-10 max-w-[580px] w-full mx-auto text-center"
+      >
+        <div
+          className="text-[11px] sm:text-xs font-mono-num tracking-[0.34em] text-[#94a3b8] uppercase animate-cinematic-line"
+          style={{ animationDelay: instant ? '0ms' : '60ms' }}
+        >
+          {act.actCode}
         </div>
 
-        <div className="py-2 space-y-3">
-          <h2
-            id="intro-title"
-            className="font-display text-lg font-bold text-[#f4f1ea] tracking-wide"
-          >
-            {slide.title}
-          </h2>
-          <p className="text-xs sm:text-[13px] text-[#cbd5e1] leading-relaxed">{slide.body}</p>
-        </div>
+        <h2
+          id="intro-title"
+          className={`mt-4 font-display font-black text-[30px] sm:text-[38px] leading-[1.2] tracking-[0.16em] animate-cinematic-title ${act.titleClass}`}
+          style={{ animationDelay: instant ? '0ms' : '160ms' }}
+        >
+          {act.title}
+        </h2>
 
-        <div className="flex items-center justify-between gap-3 pt-1">
-          <div className="flex items-center gap-1.5">
-            {INTRO_SLIDES.map((_, i) => (
-              <span
+        <div
+          className={`w-28 h-px mx-auto my-6 bg-gradient-to-r from-transparent ${act.accentColor} to-transparent animate-cinematic-line`}
+          style={{ animationDelay: instant ? '0ms' : '280ms' }}
+        />
+
+        <div className="space-y-3.5 sm:space-y-4">
+          {act.lines.map((line, i) => (
+            <p
+              key={i}
+              className="text-[15px] sm:text-[17px] leading-[1.95] text-[#dce4f0]/95 font-normal tracking-[0.03em] animate-cinematic-line"
+              style={{
+                animationDelay: instant ? '0ms' : `${460 + i * 620}ms`,
+              }}
+            >
+              <RichLoreText text={line} />
+            </p>
+          ))}
+        </div>
+      </main>
+
+      {/* Bottom Cinema Timeline & Focal CTA */}
+      <footer className="relative z-10 px-6 sm:px-8 pb-7 pt-3 max-w-[580px] w-full mx-auto flex flex-col items-center gap-4">
+        {!instant && (
+          <span className="text-[10px] tracking-[0.2em] text-[#64748b] animate-pulse">
+            轻触屏幕即可加速显现
+          </span>
+        )}
+
+        <div className="w-full flex items-center justify-between gap-4">
+          <div className="flex items-center gap-2">
+            {INTRO_ACTS.map((_, i) => (
+              <button
                 key={i}
-                className={`h-1.5 rounded-full transition-all ${
-                  i === step ? 'w-5 bg-[#38bdf8]' : 'w-1.5 bg-[#2e3552]'
+                type="button"
+                aria-label={`前往第${i + 1}幕`}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setStep(i);
+                  setSkipStaggerForStep(null);
+                }}
+                className={`h-1 rounded-sm transition-all cursor-pointer ${
+                  i === step
+                    ? 'w-8 bg-[#38bdf8] shadow-[0_0_8px_rgba(56,189,248,0.8)]'
+                    : i < step
+                      ? 'w-3 bg-[#38bdf8]/45'
+                      : 'w-2.5 bg-white/15 hover:bg-white/30'
                 }`}
               />
             ))}
@@ -132,55 +303,121 @@ export function IntroModal() {
           {!isLast ? (
             <button
               type="button"
-              onClick={() => setStep((s) => s + 1)}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-semibold bg-[#06b6d4]/25 border border-[#22d3ee]/60 text-[#ecfeff] hover:bg-[#06b6d4]/40 transition-colors cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleNext();
+              }}
+              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-md text-xs sm:text-sm font-display font-bold tracking-[0.14em] bg-[#0e172a]/90 border border-[#38bdf8]/55 text-[#e0f2fe] hover:bg-[#06b6d4]/25 hover:border-[#22d3ee] transition-all cursor-pointer animate-cinema-cta-breathe"
             >
-              <span>继续</span>
-              <ArrowRight className="w-3.5 h-3.5" />
+              <span>继 续 凝 视</span>
+              <ArrowRight className="w-4 h-4 text-[#22d3ee]" />
             </button>
           ) : (
             <button
               type="button"
-              onClick={completeIntro}
-              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-md text-xs font-semibold bg-[#e11d48] hover:bg-[#be123c] text-white transition-colors cursor-pointer"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleNext();
+              }}
+              className="inline-flex items-center gap-2 px-6 py-2.5 rounded-md text-xs sm:text-sm font-display font-black tracking-[0.16em] bg-gradient-to-r from-[#be123c] via-[#e11d48] to-[#be123c] hover:from-[#e11d48] hover:to-[#f43f5e] border border-[#fda4af]/60 text-white shadow-[0_0_24px_rgba(244,63,94,0.45)] transition-all cursor-pointer"
             >
-              <span>燃血叩击 · 逆伐天道</span>
+              <span>燃 血 叩 击 · 逆 伐 天 道</span>
             </button>
           )}
         </div>
-      </div>
+      </footer>
     </div>
   );
 }
 
 export function UnlockTutorialModal() {
   const { activeTutorial, dismissTutorial } = useGameStore();
+  const [instantNode, setInstantNode] = useState<TutorialNodeId | null>(null);
+
   if (!activeTutorial) return null;
 
   const content = TUTORIAL_CONTENT[activeTutorial];
+  const instant = instantNode === activeTutorial;
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-3"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[#04060c]/92 backdrop-blur-md p-5 animate-cinema-veil select-none overflow-hidden"
       role="dialog"
       aria-modal="true"
       aria-labelledby="tut-modal-title"
+      onClick={() => {
+        if (!instant) setInstantNode(activeTutorial);
+      }}
     >
-      <div className="w-full max-w-[400px] bg-[#151827] border border-[#fbbf24]/55 rounded-xl p-5 shadow-2xl space-y-4">
-        <div className="flex items-center gap-2 text-[#fbbf24]">
-          <Sparkles className="w-4 h-4 shrink-0" />
-          <h2 id="tut-modal-title" className="font-display text-base font-bold text-[#f4f1ea]">
+      {/* Atmospheric Node-Matched Breathing Halo */}
+      <div
+        className="pointer-events-none absolute inset-0 animate-cinema-breathe"
+        style={{ backgroundImage: content.glowGradient }}
+      />
+
+      <div
+        key={activeTutorial}
+        className={`relative z-10 w-full max-w-[460px] rounded-xl border ${content.borderClass} bg-gradient-to-b from-[#131727]/95 via-[#0e111d]/96 to-[#090b13]/98 px-6 py-7 shadow-[0_0_50px_rgba(0,0,0,0.85)] text-center space-y-5`}
+      >
+        {/* Centered Thematic Emblem */}
+        <div className="flex justify-center animate-cinematic-line" style={{ animationDelay: '40ms' }}>
+          <div className="w-16 h-16 rounded-full bg-[#0a0d16] border border-white/15 flex items-center justify-center shadow-[0_0_24px_rgba(56,189,248,0.2)]">
+            {content.emblem === 'merc_sword' ? (
+              <ArchetypeIcon archetype="merc_sword" className="w-11 h-11" />
+            ) : content.emblem === 'puppet' ? (
+              <Bot className="w-8 h-8 text-[#34d399]" />
+            ) : content.emblem === 'relic' ? (
+              <Crown className="w-8 h-8 text-[#c084fc]" />
+            ) : (
+              <Sparkles className="w-8 h-8 text-[#fbbf24]" />
+            )}
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div
+            className="text-[10px] font-mono-num tracking-[0.28em] text-[#94a3b8] uppercase animate-cinematic-line"
+            style={{ animationDelay: instant ? '0ms' : '110ms' }}
+          >
+            {content.tag}
+          </div>
+          <h2
+            id="tut-modal-title"
+            className={`font-display text-2xl sm:text-[26px] font-black tracking-[0.1em] animate-cinematic-title ${content.titleClass}`}
+            style={{ animationDelay: instant ? '0ms' : '180ms' }}
+          >
             {content.title}
           </h2>
         </div>
 
-        <p className="text-xs text-[#cbd5e1] leading-relaxed">{content.body}</p>
+        <div
+          className="w-24 h-px mx-auto bg-gradient-to-r from-transparent via-white/25 to-transparent animate-cinematic-line"
+          style={{ animationDelay: instant ? '0ms' : '260ms' }}
+        />
 
-        <div className="flex justify-end">
+        <div className="space-y-2.5 text-left sm:text-center">
+          {content.lines.map((line, i) => (
+            <p
+              key={i}
+              className="text-[13.5px] sm:text-sm text-[#dbe4f2] leading-[1.85] animate-cinematic-line"
+              style={{ animationDelay: instant ? '0ms' : `${340 + i * 380}ms` }}
+            >
+              <RichLoreText text={line} />
+            </p>
+          ))}
+        </div>
+
+        <div
+          className="pt-2 flex flex-col items-center gap-2 animate-cinematic-line"
+          style={{ animationDelay: instant ? '0ms' : '700ms' }}
+        >
           <button
             type="button"
-            onClick={dismissTutorial}
-            className="px-4 py-2 rounded-md text-xs font-semibold bg-[#06b6d4]/25 border border-[#22d3ee]/60 text-[#ecfeff] hover:bg-[#06b6d4]/40 transition-colors cursor-pointer"
+            onClick={(e) => {
+              e.stopPropagation();
+              dismissTutorial();
+            }}
+            className="w-full sm:w-auto px-7 py-2.5 rounded-md text-xs sm:text-sm font-display font-bold tracking-[0.14em] bg-[#06b6d4]/22 border border-[#22d3ee]/65 text-[#ecfeff] hover:bg-[#06b6d4]/38 transition-all cursor-pointer animate-cinema-cta-breathe"
           >
             明了 · 继续弑神
           </button>
@@ -195,16 +432,19 @@ export function BuildGuideModal({ open, onClose }: { open: boolean; onClose: () 
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-3"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/78 backdrop-blur-sm p-3"
       role="dialog"
       aria-modal="true"
       aria-labelledby="guide-modal-title"
     >
-      <div className="w-full max-w-[440px] max-h-[85dvh] bg-[#151827] border border-[#2e3552] rounded-xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="shrink-0 px-4 py-3 border-b border-[#2e3552] flex items-center justify-between gap-2">
+      <div className="w-full max-w-[450px] max-h-[85dvh] bg-[#151827] border border-[#2e3552] rounded-xl shadow-2xl flex flex-col overflow-hidden">
+        <div className="shrink-0 px-4 py-3.5 border-b border-[#2e3552] flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
             <BookOpen className="w-4 h-4 text-[#38bdf8]" />
-            <h2 id="guide-modal-title" className="font-display text-sm font-bold text-[#f4f1ea]">
+            <h2
+              id="guide-modal-title"
+              className="font-display text-base font-black tracking-wide text-[#f4f1ea]"
+            >
               五大本命护法 · 终局协同指南
             </h2>
           </div>
@@ -218,37 +458,43 @@ export function BuildGuideModal({ open, onClose }: { open: boolean; onClose: () 
           </button>
         </div>
 
-        <div className="flex-1 min-h-0 overflow-y-auto custom-scroll p-3.5 space-y-2.5 text-xs">
-          <div className="bg-[#101322] border border-[#2e3552] rounded-lg p-3 space-y-1.5">
-            <div className="flex items-center gap-2 font-bold text-[#22d3ee]">
-              <ArchetypeIcon archetype="merc_sword" className="w-4 h-4" />
-              <ArchetypeIcon archetype="merc_tentacle" className="w-4 h-4" />
-              <span>1. 高频毒爆流（1号青冥剑侍 + 2号深渊触母）</span>
+        <div className="flex-1 min-h-0 overflow-y-auto custom-scroll p-3.5 space-y-3">
+          <div className="bg-[#101322] border border-[#06b6d4]/35 rounded-lg p-3.5 space-y-2">
+            <div className="flex items-center gap-2">
+              <ArchetypeIcon archetype="merc_sword" className="w-5 h-5" />
+              <ArchetypeIcon archetype="merc_tentacle" className="w-5 h-5" />
+              <h3 className="font-display text-sm font-black text-[#e0f2fe] tracking-wide">
+                1. 高频毒爆流
+              </h3>
             </div>
-            <p className="text-[11px] text-[#cbd5e1] leading-relaxed">
-              给剑侍洗出【万毒催熟】与【残影连击】/★【万剑归宗】，利用 0.4 秒超高频多段斩击疯狂引爆触母叠加的永久腐蚀毒（触母本命推荐 ★【万毒之源】指数叠毒）！
+            <p className="text-xs text-[#cbd5e1] leading-[1.75]">
+              <RichLoreText text="给【青冥剑侍】洗出【万毒催熟】与【残影连击】/★【万剑归宗】，利用 0.4 秒超高频多段斩击疯狂引爆【深渊触母】叠加的永久腐蚀毒（触母本命推荐 ★【万毒之源】指数叠毒）！" />
             </p>
           </div>
 
-          <div className="bg-[#101322] border border-[#2e3552] rounded-lg p-3 space-y-1.5">
-            <div className="flex items-center gap-2 font-bold text-[#fbbf24]">
-              <ArchetypeIcon archetype="merc_sword" className="w-4 h-4" />
-              <ArchetypeIcon archetype="merc_cannon" className="w-4 h-4" />
-              <span>2. 无限核弹流（1号青冥剑侍 + 3号雷火机神）</span>
+          <div className="bg-[#101322] border border-[#f59e0b]/35 rounded-lg p-3.5 space-y-2">
+            <div className="flex items-center gap-2">
+              <ArchetypeIcon archetype="merc_sword" className="w-5 h-5" />
+              <ArchetypeIcon archetype="merc_cannon" className="w-5 h-5" />
+              <h3 className="font-display text-sm font-black text-[#fef08a] tracking-wide">
+                2. 无限核弹流
+              </h3>
             </div>
-            <p className="text-[11px] text-[#cbd5e1] leading-relaxed">
-              机神自带“剑侍与主角每攻 15 次缩减 1 秒冷却”，给剑侍洗【雷火装填】、给机神洗【伴生剑意】与本命神通 ★【歼星连射】，让 5 秒重炮化为每秒轰炸的毁灭加特林！
+            <p className="text-xs text-[#cbd5e1] leading-[1.75]">
+              <RichLoreText text="【雷火机神】自带“剑侍与主角每攻 15 次缩减 1 秒冷却”，给【青冥剑侍】洗【雷火装填】、给机神洗【伴生剑意】与本命神通 ★【歼星连射】，让 5 秒重炮化为每秒轰炸的毁灭加特林！" />
             </p>
           </div>
 
-          <div className="bg-[#101322] border border-[#2e3552] rounded-lg p-3 space-y-1.5">
-            <div className="flex items-center gap-2 font-bold text-[#fb7185]">
-              <ArchetypeIcon archetype="merc_array" className="w-4 h-4" />
-              <ArchetypeIcon archetype="merc_god" className="w-4 h-4" />
-              <span>3. 千级登神流（4号天机阵尊 + 5号混沌古神嗣）</span>
+          <div className="bg-[#101322] border border-[#f43f5e]/35 rounded-lg p-3.5 space-y-2">
+            <div className="flex items-center gap-2">
+              <ArchetypeIcon archetype="merc_array" className="w-5 h-5" />
+              <ArchetypeIcon archetype="merc_god" className="w-5 h-5" />
+              <h3 className="font-display text-sm font-black text-[#fecdd3] tracking-wide">
+                3. 千级登神流
+              </h3>
             </div>
-            <p className="text-[11px] text-[#cbd5e1] leading-relaxed">
-              全员洗出【缩资减耗】与本命神通 ★【天道酬勤】，快速冲上 Lv.1000 激活全部 10 槽（每次里程碑伤害 ×4），触发 5 号位“每 100 总有效级复利 ×1.5”与 ★【千级共鸣】，轰穿 1e120 终焉古神！
+            <p className="text-xs text-[#cbd5e1] leading-[1.75]">
+              <RichLoreText text="【天机阵尊】与【混沌古神嗣】配合全员洗出【缩资减耗】与本命神通 ★【天道酬勤】，快速冲上 Lv.1000 激活全部 10 槽（每次里程碑伤害 ×4），触发 5 号位“每 100 总有效级复利 ×1.5”与 ★【千级共鸣】，轰穿 1e120 终焉古神！" />
             </p>
           </div>
         </div>
@@ -285,11 +531,14 @@ export function VictoryModal() {
       <div className="w-full max-w-[430px] bg-[#151827] border border-[#fbbf24]/50 rounded-xl p-5 shadow-2xl space-y-4">
         <div className="flex items-start justify-between gap-3">
           <div>
-            <div className="inline-flex items-center gap-1.5 text-xs font-medium text-[#fbbf24]">
+            <div className="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wider text-[#fbbf24]">
               <Trophy className="w-4 h-4" />
               <span>弑神胜利结算</span>
             </div>
-            <h2 id="victory-title" className="font-display text-lg font-bold text-[#f4f1ea] mt-1">
+            <h2
+              id="victory-title"
+              className="font-display text-xl font-black tracking-wide text-[#f4f1ea] mt-1"
+            >
               {victorySummary.tribulationName}
             </h2>
           </div>
@@ -306,19 +555,21 @@ export function VictoryModal() {
         <div className="grid grid-cols-2 gap-3 bg-[#101322] border border-[#2e3552] rounded-lg p-3.5">
           <div>
             <span className="text-[11px] text-[#94a3b8] block">本局耗时</span>
-            <span className="font-mono-num text-base font-bold text-[#f4f1ea]">
+            <span className="font-mono-num text-lg font-extrabold text-[#f4f1ea]">
               {formatTimeMs(victorySummary.clearTimeMs)}
             </span>
             {victorySummary.isNewRecord && (
-              <span className="block text-[11px] text-[#34d399] mt-0.5">刷新最快纪录</span>
+              <span className="block text-[11px] font-semibold text-[#34d399] mt-0.5">
+                刷新最快纪录
+              </span>
             )}
           </div>
           <div>
             <span className="text-[11px] text-[#94a3b8] block">竞速评级</span>
-            <span className="font-mono-num text-base font-bold text-[#fbbf24]">
+            <span className="font-mono-num text-lg font-extrabold text-[#fbbf24] text-glow-amber">
               {victorySummary.rank} 级 (×{victorySummary.rankCrystalMult})
             </span>
-            <span className="block text-xs font-mono-num text-[#c084fc] mt-0.5">
+            <span className="block text-xs font-mono-num font-bold text-[#c084fc] mt-0.5">
               +{formatNumber(victorySummary.crystalsEarned, settings.numberMode)} 神晶
             </span>
           </div>
@@ -330,7 +581,9 @@ export function VictoryModal() {
           victorySummary.mythicDropped) && (
           <div className="space-y-2 text-xs bg-[#101322] border border-[#2e3552] rounded-lg p-3 max-h-40 overflow-y-auto custom-scroll">
             {victorySummary.firstClearNote && (
-              <div className="text-[#fde68a]">首通解锁：{victorySummary.firstClearNote}</div>
+              <div className="text-[#fde68a] leading-relaxed">
+                首通解锁：<RichLoreText text={victorySummary.firstClearNote} />
+              </div>
             )}
             {victorySummary.unlockedSssAutoRepeat && (
               <div className="text-[#6ee7b7]">
@@ -451,6 +704,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
     settings,
     setNumberMode,
     setSoundEnabled,
+    replayIntro,
     exportSaveString,
     importSaveString,
     hardResetAll,
@@ -563,6 +817,24 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               )}
             </button>
           </div>
+
+          <div className="flex items-center justify-between gap-2">
+            <div>
+              <span className="text-xs font-medium text-[#f4f1ea] block">世界观序章</span>
+              <span className="text-[11px] text-[#94a3b8]">重温开场三幕剧情演算</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                onClose();
+                replayIntro();
+              }}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium border border-[#38bdf8]/45 bg-[#06b6d4]/15 text-[#cffafe] hover:bg-[#06b6d4]/28 cursor-pointer shrink-0"
+            >
+              <Film className="w-3.5 h-3.5 text-[#22d3ee]" />
+              <span>重温序章</span>
+            </button>
+          </div>
         </div>
 
         <div className="space-y-2">
@@ -651,12 +923,15 @@ export function TribulationsModal({ open, onClose }: { open: boolean; onClose: (
       aria-labelledby="trib-modal-title"
     >
       <div className="w-full max-w-[440px] max-h-[86dvh] bg-[#151827] border border-[#2e3552] rounded-xl shadow-2xl flex flex-col overflow-hidden">
-        <div className="shrink-0 px-4 py-3 border-b border-[#2e3552] flex items-center justify-between gap-2">
+        <div className="shrink-0 px-4 py-3.5 border-b border-[#2e3552] flex items-center justify-between gap-2">
           <div>
-            <h2 id="trib-modal-title" className="font-display text-sm font-bold text-[#f4f1ea]">
+            <h2
+              id="trib-modal-title"
+              className="font-display text-base font-black tracking-wide text-[#f4f1ea]"
+            >
               诸天劫数 · 速通与轮回
             </h2>
-            <p className="text-[11px] text-[#94a3b8]">
+            <p className="text-[11px] text-[#94a3b8] mt-0.5">
               15秒内 SSS 通关解锁自动连刷 · 轮回 NG+{meta.ngPlusCount}
             </p>
           </div>
@@ -709,7 +984,7 @@ export function TribulationsModal({ open, onClose }: { open: boolean; onClose: (
             return (
               <div
                 key={t.id}
-                className={`rounded-lg p-2.5 border flex items-center justify-between gap-2.5 ${
+                className={`rounded-lg p-3 border flex items-center justify-between gap-2.5 ${
                   isCurrent
                     ? 'bg-[#f43f5e]/12 border-[#f43f5e]/55'
                     : unlocked
@@ -717,26 +992,26 @@ export function TribulationsModal({ open, onClose }: { open: boolean; onClose: (
                       : 'bg-[#111421] border-white/8 opacity-65'
                 }`}
               >
-                <div className="min-w-0 flex-1 space-y-0.5">
-                  <div className="flex items-center gap-1.5 flex-wrap">
-                    <span className="font-display text-xs font-bold text-[#f4f1ea]">
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-display text-sm font-black tracking-wide text-[#f4f1ea]">
                       {t.name}
                       {t.id === 'tier_10' && meta.ngPlusCount > 0 ? `+${meta.ngPlusCount}` : ''}
                     </span>
-                    <span className="font-mono-num text-[11px] text-[#fda4af]">
+                    <span className="font-mono-num text-xs font-bold text-[#fda4af]">
                       {formatNumber(effectiveHp, settings.numberMode)} HP
                     </span>
-                    <span className="font-mono-num text-[11px] text-[#c084fc]">
+                    <span className="font-mono-num text-[11px] font-semibold text-[#c084fc]">
                       · {t.baseCrystalReward.toLocaleString()}神晶
                     </span>
                   </div>
-                  <p className="text-[11px] text-[#cbd5e1]">{t.debuffSummary}</p>
-                  <p className="text-[10px] text-[#94a3b8]">
+                  <p className="text-[11.5px] text-[#cbd5e1]">{t.debuffSummary}</p>
+                  <p className="text-[10.5px] text-[#94a3b8] leading-snug">
                     {cleared ? '已首通 · ' : '首通：'}
-                    {t.firstClearSummary} · 推荐 {t.recommendedLv}
+                    <RichLoreText text={t.firstClearSummary} /> · 推荐 {t.recommendedLv}
                   </p>
                   {bestMs !== undefined && (
-                    <p className="text-[10px] font-mono-num text-[#fbbf24]">
+                    <p className="text-[10.5px] font-mono-num font-semibold text-[#fbbf24]">
                       最快 {formatTimeMs(bestMs)} · 评级 {bestRank}
                       {sssReady ? ' · 自动连刷已开' : ''}
                     </p>
@@ -833,6 +1108,8 @@ export function MercForgeModal({
     slot.pendingLevelAffixes === null;
   const pityPct = Math.min(100, (meta.rerollPity / 10) * 100);
 
+  const mercTheme = MERC_TYPOGRAPHY[slot.archetype];
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/78 backdrop-blur-sm p-3"
@@ -842,20 +1119,32 @@ export function MercForgeModal({
     >
       <div className="w-full max-w-[445px] max-h-[90dvh] bg-[#151827] border border-[#2e3552] rounded-xl shadow-2xl flex flex-col overflow-hidden">
         {/* Header */}
-        <div className="shrink-0 px-4 py-3 border-b border-[#2e3552] flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 min-w-0">
-            <ArchetypeIcon archetype={slot.archetype} className="w-6 h-6" />
+        <div
+          className="shrink-0 px-4 py-3 border-b border-[#2e3552] flex items-center justify-between gap-2"
+          style={{ backgroundImage: mercTheme.radialBgStyle }}
+        >
+          <div className="flex items-center gap-2.5 min-w-0">
+            <ArchetypeIcon archetype={slot.archetype} className="w-7 h-7" />
             <div className="min-w-0">
               <h2
                 id="forge-modal-title"
-                className="font-display text-sm font-bold text-[#f4f1ea] truncate"
+                className="font-display text-base font-black text-[#f4f1ea] truncate flex items-center gap-1.5"
               >
-                {slotIndex + 1}号位 · {arch.name} Lv.{slot.level}
-                {effLv > slot.level ? ` (有效Lv.${effLv})` : ''}
+                <span className="text-xs font-mono-num text-[#94a3b8] font-semibold">
+                  {slotIndex + 1}号位
+                </span>
+                <span className={mercTheme.nameClass}>{arch.name}</span>
+                <span className={`font-mono-num text-xs font-bold ${mercTheme.levelClass}`}>
+                  Lv.{slot.level}
+                  {effLv > slot.level ? ` (${effLv})` : ''}
+                </span>
               </h2>
-              <p className="font-mono-num text-[11px] text-[#94a3b8]">
-                {arch.roleTag} · 间隔 {computed.interval.toFixed(2)}s · DPS{' '}
-                {formatNumber(computed.dpsEstimate, settings.numberMode, true)}/s
+              <p className="font-mono-num text-[11px] text-[#94a3b8] mt-0.5">
+                <span className={mercTheme.roleClass}>{arch.roleTag}</span> · 间隔{' '}
+                {computed.interval.toFixed(2)}s · DPS{' '}
+                <span className="text-[#e2e8f0] font-semibold">
+                  {formatNumber(computed.dpsEstimate, settings.numberMode, true)}/s
+                </span>
               </p>
             </div>
           </div>
@@ -872,14 +1161,18 @@ export function MercForgeModal({
         {/* Scrollable Body */}
         <div className="flex-1 min-h-0 overflow-y-auto custom-scroll p-3.5 space-y-3">
           {/* Fixed Dual Talents Summary */}
-          <div className="rounded-lg bg-[#101322] border border-[#2e3552] p-2.5 text-[11px] space-y-1">
+          <div className="rounded-lg bg-[#101322] border border-[#2e3552] p-3 text-xs space-y-1.5 leading-relaxed">
             <div className="text-[#cbd5e1]">
-              <span className="font-semibold text-[#7dd3fc]">天赋① {arch.talent1Name}：</span>
-              {arch.talent1Desc}
+              <span className="font-display font-bold text-[#7dd3fc]">
+                天赋① {arch.talent1Name}：
+              </span>
+              <RichLoreText text={arch.talent1Desc} />
             </div>
             <div className="text-[#cbd5e1]">
-              <span className="font-semibold text-[#7dd3fc]">天赋② {arch.talent2Name}：</span>
-              {arch.talent2Desc}
+              <span className="font-display font-bold text-[#7dd3fc]">
+                天赋② {arch.talent2Name}：
+              </span>
+              <RichLoreText text={arch.talent2Desc} />
             </div>
           </div>
 

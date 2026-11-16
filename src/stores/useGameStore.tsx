@@ -380,6 +380,7 @@ interface GameContextValue {
   activeTutorial: TutorialNodeId | null;
   clearVictorySummary: () => void;
   completeIntro: () => void;
+  replayIntro: () => void;
   dismissTutorial: () => void;
 
   manualClick: (xPct?: number, yPct?: number) => void;
@@ -1572,6 +1573,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     saveToLocalStorage();
   }, [saveToLocalStorage]);
 
+  const replayIntro = useCallback(() => {
+    setMeta((prev) => {
+      const next = { ...prev, hasSeenIntro: false };
+      metaRef.current = next;
+      return next;
+    });
+  }, []);
+
   const dismissTutorial = useCallback(() => {
     setActiveTutorial(null);
   }, []);
@@ -2507,6 +2516,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         activeTutorial,
         clearVictorySummary,
         completeIntro,
+        replayIntro,
         dismissTutorial,
         manualClick,
         upgradeEnlightenment,

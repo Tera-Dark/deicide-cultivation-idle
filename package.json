@@ -1,7 +1,8 @@
 {
-  "name": "react-example",
+  "name": "godslayer-dao",
   "private": true,
-  "version": "0.0.0",
+  "version": "3.5.1",
+  "description": "《弑神道果：万亿亿劫》— 修仙×克苏鲁策略构筑与天文数字增量放置游戏",
   "type": "module",
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",

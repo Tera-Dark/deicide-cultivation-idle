@@ -359,14 +359,22 @@ export function BossArena() {
     >
       {/* Top Info: Shell Name, Dual-Layer HP Bar, 10 Phase Nodes */}
       <div className="px-3 pt-2 pb-1.5 bg-[#151827]/90 border-b border-white/8 shrink-0">
-        <div className="flex items-center justify-between gap-2 text-xs mb-1">
-          <span className="font-display font-bold text-[#f4f1ea] truncate">
+        <div className="flex items-baseline justify-between gap-2 mb-1.5">
+          <span
+            className={`font-display text-sm sm:text-[15px] font-black tracking-wide truncate ${
+              run.phaseIndex >= 9
+                ? 'text-[#fda4af] text-glow-crimson'
+                : run.phaseIndex >= 6
+                  ? 'text-[#fde68a] text-glow-amber'
+                  : 'text-[#f8f5ee]'
+            }`}
+          >
             {currentShell.name}
           </span>
-          <span className="font-mono-num text-[11px] text-[#cbd5e1] shrink-0">
+          <span className="font-mono-num text-xs font-bold text-[#7dd3fc] shrink-0">
             DPS {formatNumber(totalDps, settings.numberMode, true)}/s
             {run.poisonStacks > 0 && (
-              <span className="text-[#34d399] ml-1.5">
+              <span className="text-[#34d399] font-semibold ml-1.5">
                 · 毒{run.poisonStacks}({formatNumber(poisonInfo.expectedPoison, settings.numberMode)})
               </span>
             )}
@@ -374,7 +382,7 @@ export function BossArena() {
         </div>
 
         {/* Dual-Layer Delayed HP Bar */}
-        <div className="relative h-3.5 w-full rounded-sm bg-[#090b12] border border-[#384166] overflow-hidden">
+        <div className="relative h-4 w-full rounded-sm bg-[#090b12] border border-[#384166] overflow-hidden">
           <div
             className="absolute inset-y-0 left-0 bg-[#d97706] transition-all duration-300 ease-out"
             style={{ width: `${hpPct}%` }}
@@ -383,7 +391,7 @@ export function BossArena() {
             className="absolute inset-y-0 left-0 bg-[#f43f5e]"
             style={{ width: `${hpPct}%` }}
           />
-          <div className="relative z-10 h-full flex items-center justify-center text-[10px] font-mono-num font-semibold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]">
+          <div className="relative z-10 h-full flex items-center justify-center text-[11px] font-mono-num font-bold text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.95)]">
             {formatNumber(hp, settings.numberMode)} / {formatNumber(maxHp, settings.numberMode)} (
             {hpPct.toFixed(1)}%)
           </div>
@@ -397,11 +405,11 @@ export function BossArena() {
             return (
               <div
                 key={s.phase}
-                className={`h-1 flex-1 rounded-full transition-colors ${
+                className={`h-1 flex-1 rounded-sm transition-colors ${
                   broken
                     ? 'bg-white/12'
                     : current
-                      ? 'bg-[#f43f5e]'
+                      ? 'bg-[#f43f5e] shadow-[0_0_8px_rgba(244,63,94,0.85)]'
                       : 'bg-[#f43f5e]/35'
                 }`}
                 title={s.name}
@@ -423,11 +431,12 @@ export function BossArena() {
         {phaseBreakBanner && (
           <div
             key={phaseBreakBanner.id}
-            className="pointer-events-none absolute top-2 left-1/2 z-30 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-[#be123c]/95 border border-[#fbbf24]/70 text-[11px] font-semibold text-[#fef9c3] whitespace-nowrap shadow-lg animate-banner-drop"
+            className="pointer-events-none absolute top-2.5 left-1/2 z-30 inline-flex items-center gap-2 px-5 py-1.5 rounded-sm bg-gradient-to-r from-[#0d101b]/95 via-[#881337]/92 to-[#0d101b]/95 border-y border-[#fbbf24]/75 text-xs font-display font-extrabold tracking-[0.08em] text-[#fef08a] text-glow-gold whitespace-nowrap shadow-[0_0_24px_rgba(244,63,94,0.45)] animate-banner-drop"
           >
-            <PhaseBreakSigilIcon className="w-3.5 h-3.5" />
+            <PhaseBreakSigilIcon className="w-4 h-4 text-[#fbbf24]" />
             <span>
-              破壳第 {phaseBreakBanner.phase} 重 · 词缀石 +{phaseBreakBanner.stones}
+              破壳第 {phaseBreakBanner.phase} 重 ·{' '}
+              <span className="text-[#fbbf24] font-mono-num">词缀石 +{phaseBreakBanner.stones}</span>
             </span>
           </div>
         )}

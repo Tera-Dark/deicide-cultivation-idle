@@ -19,6 +19,7 @@ import {
   getMercenaryComputedStats,
   isSlot5Active,
 } from '../core/damageCalc';
+import { MERC_TYPOGRAPHY } from '../config/highlights';
 import { calculateBulkUpgrade, formatNumber, toDecimal } from '../core/formatNumber';
 import { useGameStore } from '../stores/useGameStore';
 import { ArchetypeIcon } from './ArchetypeIcon';
@@ -47,12 +48,12 @@ export function TabMercenaries({
         <button
           type="button"
           onClick={onOpenGuideModal}
-          className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-[#181d31] border border-[#38bdf8]/40 text-[#7dd3fc] hover:bg-[#06b6d4]/20 transition-colors cursor-pointer"
+          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-[#181d31] border border-[#38bdf8]/45 text-[#7dd3fc] font-semibold hover:bg-[#06b6d4]/20 transition-colors cursor-pointer"
         >
-          <BookOpen className="w-3 h-3" />
-          <span>流派指南</span>
+          <BookOpen className="w-3.5 h-3.5" />
+          <span>流派协同指南</span>
         </button>
-        <span className="font-mono-num text-[#fbbf24] shrink-0">
+        <span className="font-mono-num font-semibold text-[#fbbf24] shrink-0">
           保底气运 {meta.rerollPity}/10
         </span>
       </div>
@@ -60,6 +61,7 @@ export function TabMercenaries({
       {/* 5 Fixed Mercenary Cards */}
       {mercs.map((slot, idx) => {
         const arch = ARCHETYPES[slot.archetype];
+        const mercTheme = MERC_TYPOGRAPHY[slot.archetype];
 
         if (!slot.unlocked) {
           const crystalCost = MERC_SLOT_CRYSTAL_COSTS[idx];
@@ -70,12 +72,15 @@ export function TabMercenaries({
               className="bg-[#131624] border border-[#2e3552] rounded-lg p-2.5 flex items-center justify-between gap-2.5"
             >
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5 text-xs font-semibold text-[#cbd5e1]">
-                  <ArchetypeIcon archetype={slot.archetype} className="w-4 h-4 opacity-50" />
-                  <span>
-                    {idx + 1}号位 · {arch.name}
+                <div className="flex items-baseline gap-1.5">
+                  <ArchetypeIcon archetype={slot.archetype} className="w-4 h-4 opacity-60 self-center" />
+                  <span className="font-mono-num text-[11px] text-[#64748b]">{idx + 1}号</span>
+                  <span className={`text-[13px] opacity-85 ${mercTheme.nameClass}`}>
+                    {arch.name}
                   </span>
-                  <span className="text-[10px] text-[#94a3b8]">({arch.roleTag})</span>
+                  <span className={`text-[10px] ${mercTheme.roleClass} opacity-75`}>
+                    ({arch.roleTag})
+                  </span>
                 </div>
                 <p className="text-[11px] text-[#94a3b8] truncate mt-0.5">
                   {idx === 0
@@ -141,8 +146,12 @@ export function TabMercenaries({
         return (
           <div
             key={idx}
-            className="bg-[#171a29] border border-[#2e3552] rounded-lg p-2 space-y-1.5"
+            className={`relative overflow-hidden bg-[#171a29] border ${mercTheme.cardBorderClass} rounded-lg p-2.5 pl-3 space-y-1.5 transition-colors`}
+            style={{ backgroundImage: mercTheme.radialBgStyle }}
           >
+            {/* Left Archetype Signature Accent Line */}
+            <div className={`absolute inset-y-1.5 left-0 w-[3px] rounded-r ${mercTheme.accentBarClass}`} />
+
             {/* Top Row: [Icon + Name + Lv + Next Slot Node] + [Upgrade +N] */}
             <div className="flex items-center justify-between gap-2">
               <button
@@ -151,22 +160,22 @@ export function TabMercenaries({
                 className="min-w-0 flex-1 flex items-center justify-between gap-2 text-left rounded p-1 -m-1 hover:bg-white/5 transition-colors cursor-pointer"
                 title="点击打开千级道纹与本命神通洗练"
               >
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <ArchetypeIcon archetype={slot.archetype} className="w-5 h-5" />
-                  <span className="font-display text-xs font-bold text-[#f4f1ea] truncate">
+                <div className="flex items-baseline gap-1.5 min-w-0">
+                  <ArchetypeIcon archetype={slot.archetype} className="w-5 h-5 self-center shrink-0" />
+                  <span className={`text-sm truncate ${mercTheme.nameClass}`}>
                     {arch.name}
                   </span>
-                  <span className="font-mono-num text-[11px] text-[#22d3ee] shrink-0">
+                  <span className={`font-mono-num text-xs font-bold shrink-0 ${mercTheme.levelClass}`}>
                     Lv.{slot.level}
                     {effLv > slot.level ? `(${effLv})` : ''}
                   </span>
                 </div>
 
-                <div className="flex items-center gap-1.5 shrink-0 font-mono-num text-[10px]">
-                  <span className="text-[#94a3b8] hidden sm:inline">
-                    {nextThreshold ? `下槽:Lv.${nextThreshold}` : '十槽圆满'}
+                <div className="flex items-center gap-1.5 shrink-0 font-mono-num text-[11px]">
+                  <span className="text-[#94a3b8] hidden sm:inline text-[10px]">
+                    {nextThreshold ? `下槽:${nextThreshold}` : '十槽圆满'}
                   </span>
-                  <span className="text-[#38bdf8]">
+                  <span className="font-bold text-[#e2e8f0]">
                     {formatNumber(computed.dpsEstimate, settings.numberMode, true)}/s
                   </span>
                 </div>
@@ -193,13 +202,13 @@ export function TabMercenaries({
             <button
               type="button"
               onClick={() => onOpenForgeModal(idx)}
-              className="w-full text-left flex items-center justify-between gap-1.5 text-[10px] px-1 py-0.5 rounded hover:bg-white/5 transition-colors cursor-pointer"
+              className="w-full text-left flex items-center justify-between gap-1.5 text-[10.5px] px-1 py-0.5 rounded hover:bg-white/5 transition-colors cursor-pointer"
             >
               <span className="text-[#94a3b8] truncate">
                 天赋：{arch.talent1Name} · {arch.talent2Name}
               </span>
-              <span className="text-[#fbbf24] font-semibold shrink-0 whitespace-nowrap">
-                {innateCfg.name}
+              <span className="text-[#fde047] font-display font-bold text-glow-gold shrink-0 whitespace-nowrap">
+                ★ {innateCfg.name}
               </span>
             </button>
 

@@ -15,6 +15,7 @@ import { TabHero } from './components/TabHero';
 import { TabMercenaries } from './components/TabMercenaries';
 import { TabRelics } from './components/TabRelics';
 import { TopStatusBar } from './components/TopStatusBar';
+import { RichLoreText } from './config/highlights';
 import { GameProvider, useGameStore } from './stores/useGameStore';
 import type { BuyMode } from './types/game';
 
@@ -177,9 +178,9 @@ function GameShell() {
           <div
             role="status"
             aria-live="polite"
-            className="absolute bottom-3 left-1/2 -translate-x-1/2 z-40 px-3 py-1.5 rounded-md bg-[#181c2e]/95 border border-[#fbbf24]/55 text-[11px] text-[#fef08a] shadow-lg pointer-events-none max-w-[92%] truncate"
+            className="absolute bottom-3.5 left-1/2 -translate-x-1/2 z-40 px-4 py-2 rounded-md bg-gradient-to-r from-[#0e1220]/96 via-[#161c30]/98 to-[#0e1220]/96 border border-[#fbbf24]/55 text-xs text-[#f1f5f9] shadow-[0_6px_26px_rgba(0,0,0,0.75)] pointer-events-none max-w-[92%] truncate font-medium tracking-wide"
           >
-            {toastMessage}
+            <RichLoreText text={toastMessage} />
           </div>
         )}
       </div>

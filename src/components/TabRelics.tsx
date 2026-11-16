@@ -27,8 +27,13 @@ export function TabRelics() {
       {/* Compact Relic Hall Pull Bar */}
       <div className="bg-[#171a29] border border-[#2e3552] rounded-lg p-2.5 flex items-center justify-between gap-2.5">
         <div className="min-w-0 flex-1">
-          <div className="text-xs font-semibold text-[#f4f1ea]">
-            遗物圣殿 · {totalOwned}/{RELICS.length}
+          <div className="flex items-baseline gap-2">
+            <span className="font-display text-sm font-black tracking-wide text-[#f4f1ea]">
+              遗物圣殿
+            </span>
+            <span className="font-mono-num text-xs font-bold text-[#c084fc]">
+              {totalOwned}/{RELICS.length}
+            </span>
           </div>
           <p className="text-[11px] text-[#a3b1cc] truncate mt-0.5">
             仙阶{meta.unlockedEpicPool ? '已开' : '劫3开'} · 神阶劫7~10掉落
@@ -108,22 +113,22 @@ export function TabRelics() {
               }`}
             >
               <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-1.5">
+                <div className="flex items-baseline gap-1.5">
                   <span
-                    className={`font-display text-xs font-bold flex items-center gap-1 truncate ${tMeta.colorClass}`}
+                    className={`font-display text-[13px] font-extrabold tracking-wide flex items-center gap-1 truncate ${tMeta.colorClass}`}
                   >
-                    {owned && <Crown className="w-3 h-3 shrink-0" />}
+                    {owned && <Crown className="w-3.5 h-3.5 shrink-0 self-center" />}
                     <span className="truncate">
                       [{tMeta.label}] {r.name}
                     </span>
                   </span>
-                  <span className="font-mono-num text-[11px] text-[#e2e8f0] shrink-0">
+                  <span className="font-mono-num text-xs font-bold text-[#e2e8f0] shrink-0">
                     {owned
                       ? `Lv.${lv}${r.maxLevel !== null ? `/${r.maxLevel}` : ''}`
                       : '未获'}
                   </span>
                 </div>
-                <p className="text-[11px] text-[#a3b1cc] mt-0.5 leading-snug">{r.description}</p>
+                <p className="text-[11.5px] text-[#a3b1cc] mt-0.5 leading-snug">{r.description}</p>
               </div>
 
               {owned ? (
