@@ -13,6 +13,8 @@ import {
   BASE_MANA_REGEN,
   BASE_MANUAL_CLICK_MANA,
   LEVEL_SLOT_THRESHOLDS,
+  MAX_ATTACKS_PER_SEC,
+  MIN_ATTACK_INTERVAL,
   PUPPET_MAX_LEVEL,
   REALM_TIERS,
   SKILLS,
@@ -45,7 +47,7 @@ export function getBossTotalHp(tribulationId: TribulationId, meta: MetaState): D
     total = total.mul(Decimal.pow(1e4, meta.ngPlusCount));
   }
   const weakenLv = getRelicTotalLv(meta, 'rel_r_boss_hp');
-  const weakenMult = Math.max(0.1, 1 - 0.015 * weakenLv);
+  const weakenMult = Math.max(0.4, 1 - 0.01 * weakenLv);
   return total.mul(weakenMult).max(100);
 }
 
@@ -98,7 +100,7 @@ export function getRealmMultiplier(realmLevel: number): Decimal {
 
 export function getCostReductionMult(meta: MetaState): number {
   const lv = getRelicTotalLv(meta, 'rel_c_cost_down');
-  return Math.max(0.1, 1 - 0.015 * lv);
+  return Math.max(0.4, 1 - 0.01 * lv);
 }
 
 export function getEffectiveGrowthRate(baseGrowth: number, tribulationId: TribulationId): number {
@@ -200,6 +202,13 @@ export function getMercCheapDiscount(
   return Math.min(0.75, raw);
 }
 
+export function getRelicCrystalBonusMult(meta: MetaState): number {
+  const saintLv = getRelicTotalLv(meta, 'rel_s_crystal_bless');
+  const epicLv = getRelicTotalLv(meta, 'rel_e_inf_crystal');
+  const mythicLv = getRelicTotalLv(meta, 'rel_m_god_crystal');
+  return 1 + 0.1 * saintLv + 0.15 * epicLv + 0.25 * mythicLv;
+}
+
 export function getGlobalMult(
   run: RunState,
   mercs: MercenarySlotState[],
@@ -235,12 +244,37 @@ export function getGlobalMult(
   const finalMultCrystalLv = meta.relicLevels.rel_m_final_mult ?? 0;
   const finalMultDropLv = meta.relicDropLevels?.rel_m_final_mult ?? 0;
   const omniBaseLv = getRelicTotalLv(meta, 'rel_m_omni_base');
+  const godCrystalLv = getRelicTotalLv(meta, 'rel_m_god_crystal');
 
-  const relicGlobalMult = Decimal.pow(1.12, infDmgCrystalLv)
-    .mul(Decimal.pow(1.02, infDmgDropLv))
-    .mul(Decimal.pow(1.5, finalMultCrystalLv))
-    .mul(Decimal.pow(1.06, finalMultDropLv))
-    .mul(1 + unlockedCount * 0.2 * omniBaseLv);
+  // Smoothed tactical / mana / execute / economy relic multipliers
+  const manaBladeLv = getRelicTotalLv(meta, 'rel_y_mana_blade');
+  const manaBladeMult = 1 + Math.floor(Math.max(0, run.mana) / 10) * 0.006 * manaBladeLv;
+
+  const executeLv = getRelicTotalLv(meta, 'rel_s_execute_dmg');
+  const hpRatioNow = toDecimal(run.bossHp).div(toDecimal(run.bossMaxHp).max(1)).toNumber();
+  const executeActivePct =
+    executeLv > 0
+      ? (hpRatioNow < 0.5 ? 0.08 * executeLv : 0) + (run.phaseIndex >= 7 ? 0.04 * executeLv : 0)
+      : 0;
+  const executeRelicMult = 1 + executeActivePct;
+
+  const stoneSurgeLv = getRelicTotalLv(meta, 'rel_s_stone_surge');
+  const stoneSurgeMult = 1 + stoneLog10 * 0.015 * stoneSurgeLv;
+
+  const voidManaLv = getRelicTotalLv(meta, 'rel_e_void_mana');
+  const voidManaBonus = Math.min(6.0, (run.manaSpentThisRun ?? 0) * 0.00025 * voidManaLv);
+  const voidManaMult = 1 + voidManaBonus;
+
+  const relicGlobalMult = Decimal.pow(1.07, infDmgCrystalLv)
+    .mul(Decimal.pow(1.015, infDmgDropLv))
+    .mul(Decimal.pow(1.25, finalMultCrystalLv))
+    .mul(Decimal.pow(1.035, finalMultDropLv))
+    .mul(1 + unlockedCount * 0.12 * omniBaseLv)
+    .mul(1 + 0.15 * godCrystalLv)
+    .mul(manaBladeMult)
+    .mul(executeRelicMult)
+    .mul(stoneSurgeMult)
+    .mul(voidManaMult);
 
   const trib = getTribulationConfig(run.tribulationId);
   const stageDecay = trib.debuff.stageDecayPerPhase
@@ -261,10 +295,12 @@ export function getHeroGrowthPerClick(
 ): Decimal {
   const L = Math.max(1, run.enlightenmentLevel);
   const flatRelic = getRelicTotalLv(meta, 'rel_c_click_flat');
+  const enlightRelic = getRelicTotalLv(meta, 'rel_r_enlight_boost');
   const firstAffixRelicLv = getRelicTotalLv(meta, 'rel_m_first_affix');
   const hGrowAffix = sumAllActiveAffixRatio(mercs, 'af_t2_h_grow', firstAffixRelicLv);
   const base = 1 + (L - 1) * (1 + Math.floor(L / 10) * 1.5) + 2 * flatRelic;
-  return new Decimal(base).mul(1 + hGrowAffix);
+  const enlightMult = 1 + Math.max(0, L - 1) * 0.02 * enlightRelic;
+  return new Decimal(base).mul(1 + hGrowAffix).mul(enlightMult);
 }
 
 export function getSkillEffectiveValues(
@@ -326,36 +362,45 @@ export function getHeroStats(
   const heroBasePower = baseHero
     .mul(realmMult)
     .mul(1 + heroBuffAffix + heroAtkAffix)
-    .mul(1 + 0.25 * clickMultRelic);
+    .mul(1 + 0.12 * clickMultRelic);
 
   const rawHeroClick = heroBasePower.mul(globalMult).mul(trib.debuff.directDmgMult ?? 1);
 
   const heroCritChance = Math.min(1, 0.1 + heroCritAffix);
-  const heroCritDmgMult = 1.5 + 0.15 * critDmgRelic;
+  const heroCritDmgMult = 1.5 + 0.1 * critDmgRelic;
   const expectedHeroClick = rawHeroClick.mul(1 + heroCritChance * (heroCritDmgMult - 1));
 
   // Mana & Regen
   const manaCap =
     BASE_MANA_CAP +
     4 * getRelicTotalLv(meta, 'rel_c_mana_cap') +
+    15 * getRelicTotalLv(meta, 'rel_e_void_mana') +
     (run.realmLevel >= 4 ? 50 : 0);
   const manaRegenAffix = sumAllActiveAffixRaw(mercs, 'af_t1_mana_r', firstAffixRelicLv);
-  const baseRegen = BASE_MANA_REGEN + (run.realmLevel >= 4 ? 1.5 : 0) + manaRegenAffix;
+  const baseRegen =
+    BASE_MANA_REGEN +
+    (run.realmLevel >= 4 ? 1.5 : 0) +
+    manaRegenAffix +
+    0.25 * getRelicTotalLv(meta, 'rel_c_mana_regen') +
+    0.8 * getRelicTotalLv(meta, 'rel_e_void_mana');
   const manaRegenPerSec = baseRegen * (trib.debuff.manaRegenMult ?? 1);
   const manualClickManaGain =
     (BASE_MANUAL_CLICK_MANA + 0.05 * getRelicTotalLv(meta, 'rel_c_mana_click')) *
     (trib.debuff.manaRegenMult ?? 1);
 
-  // Puppet (Auto-clicker)
+  // Puppet (Auto-clicker): cap effective rate at 25/s and convert overflow 1:1 into damage
   const puppetRelicLv = getRelicTotalLv(meta, 'rel_c_puppet_spd');
   const puppetAffix = sumAllActiveAffixRaw(mercs, 'af_t2_puppet', firstAffixRelicLv);
-  let puppetRate =
+  let rawPuppetRate =
     run.puppetLevel > 0
       ? 1.5 + (run.puppetLevel - 1) * 0.35 + 0.2 * puppetRelicLv + puppetAffix
       : 0;
   if (trib.debuff.autoClickCap) {
-    puppetRate = Math.min(puppetRate, trib.debuff.autoClickCap);
+    rawPuppetRate = Math.min(rawPuppetRate, trib.debuff.autoClickCap);
   }
+  const puppetRate = Math.min(MAX_ATTACKS_PER_SEC, rawPuppetRate);
+  const puppetOverflowMult =
+    rawPuppetRate > MAX_ATTACKS_PER_SEC ? rawPuppetRate / MAX_ATTACKS_PER_SEC : 1.0;
 
   const growthPerClick = getHeroGrowthPerClick(run, mercs, meta);
   const isSoftCapped = toDecimal(run.accumulatedAtk).gte(growthPerClick.mul(500));
@@ -372,7 +417,9 @@ export function getHeroStats(
     manaCap,
     manaRegenPerSec,
     manualClickManaGain,
+    rawPuppetRate,
     puppetRate,
+    puppetOverflowMult,
     puppetMaxLevel: PUPPET_MAX_LEVEL,
     growthPerClick,
     isSoftCapped,
@@ -537,36 +584,42 @@ export function getMercenaryComputedStats(
       ? 1 + slot4EffLv * 0.06 * (1 + 0.08 * arrayRelicLv)
       : 1;
 
-  let mercRelicMult = 1.0;
-  if (slotIndex === 0) mercRelicMult = 1 + 0.4 * getRelicTotalLv(meta, 'rel_r_sword_dmg');
-  else if (slotIndex === 1) mercRelicMult = 1 + 0.4 * getRelicTotalLv(meta, 'rel_r_tentacle');
-  else if (slotIndex === 2) mercRelicMult = 1 + 0.55 * getRelicTotalLv(meta, 'rel_r_cannon_dmg');
+  const mercAtkRelicMult = 1 + 0.1 * getRelicTotalLv(meta, 'rel_c_merc_atk');
+  let mercRelicMult = mercAtkRelicMult;
+  if (slotIndex === 0) mercRelicMult *= 1 + 0.2 * getRelicTotalLv(meta, 'rel_r_sword_dmg');
+  else if (slotIndex === 1) mercRelicMult *= 1 + 0.2 * getRelicTotalLv(meta, 'rel_r_tentacle');
+  else if (slotIndex === 2) mercRelicMult *= 1 + 0.25 * getRelicTotalLv(meta, 'rel_r_cannon_dmg');
 
   const heroLinkAdd = heroBasePower.mul(sumSelf('af_t3_hero_ln'));
 
-  // Step 6: Attack Interval, 0.05s Overflow Mult, Crit & Final Damage
+  // Step 6: Attack Interval, 25/s (0.04s) Overflow Mult, Crit & Final Damage
   const baseInt =
     slotIndex === 2 && slot.innateAffix === 'sp_cannon_gat'
       ? arch.baseInterval * 0.5
       : arch.baseInterval;
   const spdBonus =
-    sumSelf('af_t1_spd') + sumAllActiveAffixRatio(mercs, 'af_t3_team_sp', firstAffixRelicLv);
+    sumSelf('af_t1_spd') +
+    sumAllActiveAffixRatio(mercs, 'af_t3_team_sp', firstAffixRelicLv) +
+    0.04 * getRelicTotalLv(meta, 'rel_r_merc_spd');
   const skill4 = run.skills.sk_sync;
   const skill4Active = skill4.activeRemaining > 0;
   const skill4Spd = skill4Active ? 1.5 : 1.0;
   const rawInterval = (baseInt * (trib.debuff.mercIntervalMult ?? 1)) / ((1 + spdBonus) * skill4Spd);
-  const interval = Math.max(0.05, rawInterval);
-  const overflowSpdMult = rawInterval < 0.05 ? 0.05 / rawInterval : 1.0;
+  const interval = Math.max(MIN_ATTACK_INTERVAL, rawInterval);
+  const overflowSpdMult = rawInterval < MIN_ATTACK_INTERVAL ? MIN_ATTACK_INTERVAL / rawInterval : 1.0;
 
-  const rawCritRate = arch.baseCritRate + sumSelf('af_t1_crit_r');
+  const mercCritRelicLv = getRelicTotalLv(meta, 'rel_r_merc_crit');
+  const rawCritRate = arch.baseCritRate + sumSelf('af_t1_crit_r') + 0.015 * mercCritRelicLv;
   const hasOmniCrit = slot.innateAffix === 'sp_omni_crit';
   const critRate = hasOmniCrit ? 1.0 : Math.min(1.0, rawCritRate);
-  const omniOverflowDmg = hasOmniCrit && rawCritRate > 1.0 ? (rawCritRate - 1.0) * 3.0 : 0;
+  const critOverflowScale = hasOmniCrit ? 3.0 : mercCritRelicLv > 0 ? 2.0 : 0;
+  const omniOverflowDmg =
+    critOverflowScale > 0 && rawCritRate > 1.0 ? (rawCritRate - 1.0) * critOverflowScale : 0;
   const critDmg =
     arch.baseCritDmg +
     sumSelf('af_t1_crit_d') +
     Math.floor(slot3EffLv / 10) * sumSelf('af_t3_can_s') +
-    0.15 * critDmgRelic +
+    0.1 * critDmgRelic +
     omniOverflowDmg;
 
   let rawDmg = panelBase
@@ -602,7 +655,7 @@ export function getMercenaryComputedStats(
 
     const poisonAffixSum = sumAllActiveAffixRatio(mercs, 'af_t1_poison', firstAffixRelicLv);
     const tentSymbiosisSum = sumAllActiveAffixRatio(mercs, 'af_t3_tent_s', firstAffixRelicLv);
-    const tentRelic = 1 + 0.4 * getRelicTotalLv(meta, 'rel_r_tentacle');
+    const tentRelic = 1 + 0.2 * getRelicTotalLv(meta, 'rel_r_tentacle');
 
     poisonPanelPerSec = poisonBasePanel
       .mul(1 + poisonAffixSum)
@@ -681,7 +734,7 @@ export function getPoisonTickExpectedDamage(
   }
   const critChance = Math.min(1, 0.3 + 0.04 * dotCritLv);
   const critDmg =
-    2.0 + 0.4 * dotCritLv + 0.15 * getRelicTotalLv(meta, 'rel_r_crit_dmg');
+    2.0 + 0.4 * dotCritLv + 0.1 * getRelicTotalLv(meta, 'rel_r_crit_dmg');
   const expectedPoison = rawPoison.mul(1 + critChance * (critDmg - 1));
   return { rawPoison, critChance, critDmg, expectedPoison };
 }
@@ -711,7 +764,7 @@ export function getSpiritStoneMultiplier(
 
   return (
     0.15 *
-    (1 + slot4GoldBonus + goldAffix + 0.15 * stoneRelicLv) *
+    (1 + slot4GoldBonus + goldAffix + 0.1 * stoneRelicLv) *
     stagePenalty *
     tierDebuff
   );

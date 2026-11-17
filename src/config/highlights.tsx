@@ -117,29 +117,33 @@ const HIGHLIGHT_RULES: HighlightRule[] = [
       'font-semibold text-[#34d399] text-glow-emerald mx-[1px]',
   },
   {
-    tokens: ['神阶·古神遗物', '神阶遗物', '神阶'],
-    className:
-      'font-display font-bold text-[#fb7185] text-glow-crimson mx-[1px]',
+    tokens: ['神·古神遗物', '神遗物'],
+    className: 'font-tier-mythic font-bold mx-[1px]',
   },
   {
-    tokens: ['五大本命护法', '道纹洗练面板', '遗物圣殿', '古神遗物', '仙阶遗物', '仙阶'],
+    tokens: ['五大本命护法', '道纹洗练面板', '遗物圣殿', '古神遗物'],
     className:
       'font-display font-bold text-[#fbbf24] text-glow-gold mx-[1px]',
   },
   {
-    tokens: ['圣阶遗物', '圣阶'],
-    className:
-      'font-display font-bold text-[#c084fc] text-glow-purple mx-[1px]',
+    tokens: ['仙遗物'],
+    className: 'font-tier-epic font-bold mx-[1px]',
   },
   {
-    tokens: ['玄阶遗物', '玄阶'],
-    className:
-      'font-display font-bold text-[#38bdf8] text-glow-sky mx-[1px]',
+    tokens: ['圣遗物', '圣阶遗物'],
+    className: 'font-tier-saint font-bold mx-[1px]',
   },
   {
-    tokens: ['灵阶遗物', '灵阶'],
-    className:
-      'font-display font-bold text-[#34d399] text-glow-emerald mx-[1px]',
+    tokens: ['玄遗物'],
+    className: 'font-tier-mystic font-bold mx-[1px]',
+  },
+  {
+    tokens: ['灵遗物'],
+    className: 'font-tier-rare font-bold mx-[1px]',
+  },
+  {
+    tokens: ['凡遗物'],
+    className: 'font-tier-common font-bold mx-[1px]',
   },
   {
     tokens: [
@@ -153,6 +157,11 @@ const HIGHLIGHT_RULES: HighlightRule[] = [
       '千级共鸣',
       '自动连续挑战',
       '自动连续释放',
+      '自动破境',
+      '自动傀儡',
+      '自动顿悟',
+      '自动强化神通',
+      '护法自动升级',
       '批量锁槽',
       '神晶本命神通洗练',
     ],
@@ -196,6 +205,16 @@ const NUMERIC_CALLOUT_PATTERN =
 
 const COMBINED_PATTERN = `【([^】]+)】|(${TOKEN_PATTERN})|(${NUMERIC_CALLOUT_PATTERN})`;
 
+// Bracket-only single-character tier labels (【凡】【灵】【玄】【圣】【仙】【神】)
+const BRACKET_ONLY_TOKEN_MAP = new Map<string, string>([
+  ['凡', 'font-tier-common font-bold mx-[1px]'],
+  ['灵', 'font-tier-rare font-bold mx-[1px]'],
+  ['玄', 'font-tier-mystic font-bold mx-[1px]'],
+  ['圣', 'font-tier-saint font-bold mx-[1px]'],
+  ['仙', 'font-tier-epic font-bold mx-[1px]'],
+  ['神', 'font-tier-mythic font-bold mx-[1px]'],
+]);
+
 /**
  * Renders lore, tutorials, guides, and skill descriptions with semantic color luminescence
  * and clean editorial emphasis (no noisy pill chips or raw bracket clutter).
@@ -233,7 +252,7 @@ export function RichLoreText({
 
     if (bracketInner !== undefined) {
       // Render bracketed phrase recursively so multi-part phrases like "1号位：青冥剑侍" or "80 灵石 & 2 词缀石" get exact highlights cleanly without 【】 clutter
-      const mapped = TOKEN_CLASS_MAP.get(bracketInner);
+      const mapped = TOKEN_CLASS_MAP.get(bracketInner) ?? BRACKET_ONLY_TOKEN_MAP.get(bracketInner);
       if (mapped) {
         nodes.push(
           <span key={`hl-${keyCounter++}`} className={mapped}>

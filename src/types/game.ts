@@ -77,30 +77,45 @@ export type RelicId =
   | 'rel_c_cost_down'
   | 'rel_c_mana_cap'
   | 'rel_c_mana_click'
+  | 'rel_c_merc_atk'
+  | 'rel_c_mana_regen'
   | 'rel_c_puppet_spd'
   | 'rel_c_start_gold'
   | 'rel_r_sword_dmg'
   | 'rel_r_tentacle'
   | 'rel_r_cannon_dmg'
+  | 'rel_r_thunder'
+  | 'rel_r_merc_spd'
+  | 'rel_r_merc_crit'
+  | 'rel_r_enlight_boost'
   | 'rel_r_array_buff'
   | 'rel_r_skill_cd'
   | 'rel_r_skill_dur'
-  | 'rel_r_thunder'
   | 'rel_r_crit_dmg'
-  | 'rel_r_essence'
   | 'rel_r_boss_hp'
-  | 'rel_e_auto_start'
+  | 'rel_y_mana_blade'
+  | 'rel_y_shell_burst'
+  | 'rel_y_drop_luck'
+  | 'rel_r_essence'
   | 'rel_e_free_roll'
   | 'rel_e_affix_luck'
   | 'rel_e_dot_crit'
+  | 'rel_s_crystal_bless'
+  | 'rel_s_execute_dmg'
+  | 'rel_s_stone_surge'
+  | 'rel_e_auto_start'
   | 'rel_e_boss_skip'
   | 'rel_e_inf_dmg'
   | 'rel_e_inf_crystal'
+  | 'rel_e_rarity_crown'
+  | 'rel_e_click_storm'
+  | 'rel_e_void_mana'
   | 'rel_m_first_affix'
   | 'rel_m_auto_skill'
   | 'rel_m_omni_base'
   | 'rel_m_click_echo'
-  | 'rel_m_final_mult';
+  | 'rel_m_final_mult'
+  | 'rel_m_god_crystal';
 
 export type TribulationId =
   | 'tier_1'
@@ -172,6 +187,7 @@ export interface RunState {
   realmLevel: number;
   puppetLevel: number;
   skills: Record<SkillId, SkillRuntimeState>;
+  manaSpentThisRun: number;
   heroBuffStacks: HeroBuffStack[]; // FIFO max 25
   timerStarted: boolean;
   elapsedMs: number;
@@ -181,6 +197,15 @@ export interface RunState {
     poison: string;
     mercs: [string, string, string, string, string];
   };
+}
+
+export interface AutoUpgradeSettings {
+  autoRealm: boolean;
+  autoPuppet: boolean;
+  autoEnlightenment: boolean;
+  autoSkills: boolean;
+  autoMercs: boolean;
+  autoMercSlots: [boolean, boolean, boolean, boolean, boolean];
 }
 
 export interface MetaState {
@@ -194,6 +219,10 @@ export interface MetaState {
   unlockedInnateReroll: boolean;
   unlockedEpicPool: boolean;
   unlockedAutoSkill: boolean;
+  unlockedAutoRealm: boolean;
+  unlockedAutoHeroUpgrades: boolean;
+  unlockedAutoMercUpgrade: boolean;
+  autoSettings: AutoUpgradeSettings;
   hasSeenIntro: boolean;
   shownTutorials: Record<TutorialNodeId, boolean>;
   clearedTribulations: Record<TribulationId, boolean>;
@@ -221,6 +250,7 @@ export interface SettingsState {
   floatingTextMode: FloatingTextMode;
   hitVfxEnabled: boolean;
   vibrationEnabled: boolean;
+  silentAutoClear: boolean;
 }
 
 export interface GameSaveData {
@@ -307,6 +337,20 @@ export interface VictorySummary {
   } | null;
 }
 
+export interface SilentClearReport {
+  tribulationId: TribulationId;
+  tribulationName: string;
+  clearTimeMs: number;
+  rank: SpeedrunRank;
+  crystalsEarned: string;
+  dropCount: number;
+  overflowCrystals: string;
+  unlockedNextOrder: number | null;
+  autoRepeatRound: number;
+  updatedAt: number;
+  summary: VictorySummary;
+}
+
 export interface ArchetypeConfig {
   id: ArchetypeId;
   slotIndex: number;
@@ -385,6 +429,7 @@ export interface TribulationConfig {
   baseCrystalReward: number;
   firstClearSummary: string;
   relicDropTier: RelicTier;
+  relicDropWeights: Partial<Record<RelicTier, number>>;
   relicDropCount: number;
   unlockReqPrevClears: number;
   unlockReqRelicLevels: number;

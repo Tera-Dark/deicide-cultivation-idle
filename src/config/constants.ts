@@ -36,6 +36,16 @@ export const PUPPET_UNLOCK_COST = 60;
 export const PUPPET_COST_GROWTH = 1.28;
 export const PUPPET_MAX_LEVEL = 50;
 
+export const MAX_ATTACKS_PER_SEC = 25;
+export const MIN_ATTACK_INTERVAL = 1 / MAX_ATTACKS_PER_SEC; // 0.04s min interval (25 hits/sec)
+
+export const MAX_ONSCREEN_FLOATING_TEXTS = 6;
+export const FLOATING_TEXT_MIN_INTERVAL_MS = 85;
+export const MAX_ONSCREEN_RIPPLES = 4;
+export const RIPPLE_MIN_INTERVAL_MS = 65;
+export const PHASE_BANNER_MIN_INTERVAL_MS = 300;
+export const TOAST_DURATION_MS = 2200;
+
 export const MERC_SLOT_CRYSTAL_COSTS = [0, 20, 400, 8000, 150000] as const;
 
 export const LEVEL_SLOT_THRESHOLDS = [10, 25, 50, 100, 200, 350, 500, 650, 800, 1000] as const;

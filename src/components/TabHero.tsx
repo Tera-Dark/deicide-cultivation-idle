@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import Decimal from 'break_infinity.js';
-import { ArrowUpCircle, Bot, Lock, Sparkles, Zap } from 'lucide-react';
+import { ArrowUpCircle, Bot, ChevronDown, ChevronUp, Lock, Sparkles, Zap } from 'lucide-react';
 import {
   ENLIGHTENMENT_BASE_COST,
   ENLIGHTENMENT_COST_GROWTH,
@@ -29,6 +30,7 @@ export function TabHero() {
     breakthroughRealm,
     buyPuppet,
     upgradeSkill,
+    toggleAutoSetting,
   } = useGameStore();
 
   const stones = toDecimal(run.spiritStones);
@@ -64,9 +66,91 @@ export function TabHero() {
   );
   const puppetAtMax = run.puppetLevel >= PUPPET_MAX_LEVEL;
   const showPuppet = meta.hasUnlockedPuppet || run.puppetLevel > 0;
+  const autoCfg = meta.autoSettings;
+  const [autoOpen, setAutoOpen] = useState(false);
+
+  const autoItems = [
+    {
+      key: 'autoRealm' as const,
+      label: '自动破境',
+      unlocked: meta.unlockedAutoRealm,
+      reqHint: '劫3',
+    },
+    {
+      key: 'autoPuppet' as const,
+      label: '自动傀儡',
+      unlocked: meta.unlockedAutoRealm,
+      reqHint: '劫3',
+    },
+    {
+      key: 'autoEnlightenment' as const,
+      label: '自动顿悟',
+      unlocked: meta.unlockedAutoHeroUpgrades,
+      reqHint: '劫5',
+    },
+    {
+      key: 'autoSkills' as const,
+      label: '自动强技',
+      unlocked: meta.unlockedAutoHeroUpgrades,
+      reqHint: '劫5',
+    },
+  ];
+  const activeAutoCount = autoItems.filter((i) => i.unlocked && autoCfg[i.key]).length;
+  const unlockedAutoCount = autoItems.filter((i) => i.unlocked).length;
 
   return (
     <div className="space-y-2.5">
+      {/* Collapsible Late-Game Automation Control Panel */}
+      <div className="bg-[#121626] border border-[#2e3552] rounded-xl overflow-hidden">
+        <button
+          type="button"
+          onClick={() => setAutoOpen((v) => !v)}
+          className="w-full min-h-[42px] px-3 py-2 flex items-center justify-between gap-2 text-xs hover:bg-white/[0.03] transition-colors cursor-pointer"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <span className="font-display font-bold text-[#7dd3fc] tracking-wide shrink-0">
+              灵枢自动修行
+            </span>
+            <span className="font-mono-num text-[11px] text-[#94a3b8] truncate">
+              {unlockedAutoCount > 0
+                ? `已开启 ${activeAutoCount}/${unlockedAutoCount}`
+                : '劫三开破境/傀儡 · 劫五开顿悟/强技'}
+            </span>
+          </div>
+          <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#94a3b8] shrink-0">
+            <span>{autoOpen ? '收起' : '展开'}</span>
+            {autoOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+          </span>
+        </button>
+
+        {autoOpen && (
+          <div className="px-3 pb-2.5 pt-1 border-t border-white/6 grid grid-cols-2 sm:grid-cols-4 gap-2">
+            {autoItems.map((item) => {
+              const active = item.unlocked && autoCfg[item.key];
+              return (
+                <button
+                  key={item.key}
+                  type="button"
+                  onClick={() => toggleAutoSetting(item.key)}
+                  className={`min-h-[40px] px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer flex items-center justify-between gap-1 ${
+                    !item.unlocked
+                      ? 'bg-[#101322] border-[#2e3552]/70 text-[#64748b]'
+                      : active
+                        ? 'bg-[#10b981]/22 border-[#34d399]/60 text-[#ecfdf5]'
+                        : 'bg-[#1a1f32] border-[#384166] text-[#cbd5e1] hover:text-white'
+                  }`}
+                >
+                  <span className="truncate">{item.label}</span>
+                  <span className="font-mono-num text-[11px] shrink-0">
+                    {!item.unlocked ? item.reqHint : active ? '开' : '关'}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
       {/* Realm Breakthrough Card */}
       <div className="bg-[#171a29] border border-[#c084fc]/45 rounded-xl p-3.5 flex items-center justify-between gap-3">
         <div className="min-w-0 flex-1 space-y-1">
@@ -161,13 +245,17 @@ export function TabHero() {
             </span>
             <span className="font-mono-num text-[13px] font-bold text-[#34d399]">
               {showPuppet
-                ? `Lv.${run.puppetLevel}/${PUPPET_MAX_LEVEL} · ${heroStats.puppetRate.toFixed(1)}/s`
+                ? `Lv.${run.puppetLevel}/${PUPPET_MAX_LEVEL} · ${heroStats.puppetRate.toFixed(1)}/s${
+                    heroStats.puppetOverflowMult > 1
+                      ? ` (超速转攻×${heroStats.puppetOverflowMult.toFixed(2)})`
+                      : ''
+                  }`
                 : '未解锁'}
             </span>
           </div>
           <p className="text-xs text-[#a3b1cc] leading-snug">
             {showPuppet
-              ? '自动叩击古神（享 25% 顿悟修为成长）'
+              ? '自动叩击古神（享 25% 顿悟修为成长 · 上限25次/秒，超限等比例转攻击）'
               : '首次击破第 1 重躯壳（500 血）后开放'}
           </p>
         </div>

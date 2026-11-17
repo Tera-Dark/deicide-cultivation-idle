@@ -46,7 +46,7 @@ import { ARCHETYPES } from '../config/archetypes';
 import { TRIBULATIONS } from '../config/bosses';
 import { LEVEL_SLOT_NAMES, LEVEL_SLOT_THRESHOLDS } from '../config/constants';
 import { MERC_TYPOGRAPHY, RichLoreText } from '../config/highlights';
-import { RELIC_TIER_META } from '../config/relics';
+import { RELIC_TIER_META, getTribulationEffectiveDropOdds } from '../config/relics';
 import {
   evaluateSpeedrunRank,
   getBossTotalHp,
@@ -65,6 +65,8 @@ import { useGameStore } from '../stores/useGameStore';
 import type { MercenarySlotState, MetaState, RunState, TutorialNodeId } from '../types/game';
 import { ArchetypeIcon } from './ArchetypeIcon';
 import { PhaseBreakSigilIcon } from './CultivationIcons';
+import coverBannerImg from '../assets/images/taptap_cover_banner_1794919855982.jpg';
+import taptapIconImg from '../assets/images/taptap_icon_1794919853581.jpg';
 
 interface IntroAct {
   actCode: string;
@@ -178,7 +180,7 @@ const TUTORIAL_CONTENT: Record<TutorialNodeId, TutorialCinemaMeta> = {
     borderClass: 'border-[#c084fc]/55',
     emblem: 'relic',
     lines: [
-      '恭喜轰杀古神第一尊分身，获赠【15 颗】【神晶】与首件【凡阶遗物】！',
+      '恭喜轰杀古神第一尊分身，获赠【15 颗】【神晶】与首件【凡遗物】！',
       '建议攒够 20 神晶唤醒【2号位：深渊触母】开启高频毒爆流，',
       '并重复刷取劫数积攒【遗物圣殿】总阶数，逐层破禁冲击高阶古神！',
     ],
@@ -189,6 +191,8 @@ export function IntroModal() {
   const { meta, completeIntro } = useGameStore();
   const [step, setStep] = useState(0);
   const [skipStaggerForStep, setSkipStaggerForStep] = useState<number | null>(null);
+  const [heroImgBroken, setHeroImgBroken] = useState(false);
+  const [iconImgBroken, setIconImgBroken] = useState(false);
 
   if (meta.hasSeenIntro) return null;
 
@@ -215,12 +219,23 @@ export function IntroModal() {
         if (!instant) setSkipStaggerForStep(step);
       }}
     >
-      {/* Breathing Void Aura & Subtle Celestial Sigil Backdrop */}
+      {/* Breathing Void Aura & Subtle Cover Illustration Backdrop */}
+      {!heroImgBroken && (
+        <img
+          src={coverBannerImg}
+          alt=""
+          aria-hidden="true"
+          referrerPolicy="no-referrer"
+          onError={() => setHeroImgBroken(true)}
+          className="pointer-events-none absolute inset-0 w-full h-full object-cover opacity-[0.26] scale-105 blur-[1px] select-none"
+        />
+      )}
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-[#04050a]/92 via-[#04050a]/72 to-[#04050a]" />
       <div
         className="pointer-events-none absolute inset-0 animate-cinema-breathe transition-all duration-1000"
         style={{ backgroundImage: act.glowGradient }}
       />
-      <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-[0.055]">
+      <div className="pointer-events-none absolute inset-0 flex items-center justify-center opacity-[0.06]">
         <PhaseBreakSigilIcon className="w-[380px] h-[380px] sm:w-[460px] sm:h-[460px] animate-sigil-cw" />
       </div>
       <div
@@ -254,6 +269,24 @@ export function IntroModal() {
         key={`act-${step}`}
         className="relative z-10 flex-1 flex flex-col items-center justify-center px-6 sm:px-10 max-w-[580px] w-full mx-auto text-center"
       >
+        {step === 2 && (
+          <div
+            className="mb-4 w-16 h-16 sm:w-20 sm:h-20 rounded-2xl overflow-hidden border border-[#f59e0b]/40 bg-[#0b101b]/90 shadow-[0_0_24px_rgba(245,158,11,0.28)] flex items-center justify-center animate-cinematic-line"
+            style={{ animationDelay: instant ? '0ms' : '20ms' }}
+          >
+            {!iconImgBroken ? (
+              <img
+                src={taptapIconImg}
+                alt="弑神道果图腾徽记"
+                referrerPolicy="no-referrer"
+                onError={() => setIconImgBroken(true)}
+                className="w-full h-full object-cover"
+              />
+            ) : (
+              <PhaseBreakSigilIcon className="w-9 h-9 text-[#fbbf24]" />
+            )}
+          </div>
+        )}
         <div
           className="text-[11px] sm:text-xs font-mono-num tracking-[0.34em] text-[#94a3b8] uppercase animate-cinematic-line"
           style={{ animationDelay: instant ? '0ms' : '60ms' }}
@@ -632,9 +665,9 @@ export function VictoryModal() {
                     return (
                       <div
                         key={d.relicId}
-                        className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-xs font-medium ${tMeta.borderClass} ${tMeta.badgeBgClass} ${tMeta.colorClass}`}
+                        className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-xs font-medium ${tMeta.borderClass} ${tMeta.badgeBgClass}`}
                       >
-                        <span className="font-bold truncate">
+                        <span className={`truncate ${tMeta.fontClass}`}>
                           [{tMeta.label}] {d.name}
                         </span>
                         <span className="font-mono-num text-[#f8fafc] shrink-0">
@@ -651,7 +684,7 @@ export function VictoryModal() {
             {convertedOverflowDrops.length > 0 && (
               <div className="space-y-1.5 pt-1 border-t border-white/10">
                 <div className="text-xs font-semibold text-[#c084fc]">
-                  特殊上限遗物满印溢转（同品阶神晶）：
+                  特殊上限遗物满印溢转（同阶神晶）：
                 </div>
                 {convertedOverflowDrops.map((ov) => {
                   const tMeta = RELIC_TIER_META[ov.tier];
@@ -660,7 +693,7 @@ export function VictoryModal() {
                       key={ov.relicId}
                       className="flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border border-[#c084fc]/35 bg-[#191529] text-xs"
                     >
-                      <span className={`font-semibold truncate ${tMeta.colorClass}`}>
+                      <span className={`truncate ${tMeta.fontClass}`}>
                         [{tMeta.label}] {ov.name} ×{ov.count}
                       </span>
                       <span className="font-mono-num font-bold text-[#e9d5ff] shrink-0">
@@ -708,11 +741,11 @@ export function VictoryModal() {
           </div>
         )}
 
-        {autoRepeatCountdown !== null && (
+        {autoRepeatCountdown !== null ? (
           <div className="flex items-center justify-between gap-2 bg-[#10b981]/18 border border-[#34d399]/45 rounded-lg px-3.5 py-2.5 text-xs text-[#a7f3d0]">
             <span className="inline-flex items-center gap-1.5">
               <Repeat className="w-4 h-4" />
-              自动连刷中：{autoRepeatCountdown.toFixed(1)}s 后重开…
+              无感连刷中：{autoRepeatCountdown.toFixed(2)}s 后重开…
             </span>
             <button
               type="button"
@@ -722,7 +755,25 @@ export function VictoryModal() {
               暂停
             </button>
           </div>
-        )}
+        ) : meta.sssUnlockedAutoRepeat[victorySummary.tribulationId] ? (
+          <div className="flex items-center justify-between gap-2 bg-[#101322] border border-[#2e3552] rounded-lg px-3.5 py-2 text-xs text-[#cbd5e1]">
+            <span className="inline-flex items-center gap-1.5">
+              <Repeat className="w-3.5 h-3.5 text-[#34d399]" />
+              <span>已解锁本劫 0.25s 无感连刷（结算设置可改全静默）</span>
+            </span>
+            <button
+              type="button"
+              onClick={toggleAutoRepeat}
+              className={`px-2.5 py-1 rounded font-semibold cursor-pointer ${
+                meta.autoRepeatEnabled
+                  ? 'bg-[#10b981]/25 text-[#6ee7b7]'
+                  : 'bg-[#1e2338] text-[#e2e8f0] hover:bg-[#272e49]'
+              }`}
+            >
+              {meta.autoRepeatEnabled ? '连刷：开' : '开启连刷'}
+            </button>
+          </div>
+        ) : null}
 
         <div className="flex items-center gap-2.5 pt-1">
           <button
@@ -1077,6 +1128,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
     setFloatingTextMode,
     setHitVfxEnabled,
     setVibrationEnabled,
+    setSilentAutoClear,
     replayIntro,
     exportSaveString,
     importSaveString,
@@ -1267,6 +1319,29 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
                   }`}
                 >
                   <span>{settings.vibrationEnabled ? '已开启' : '已关闭'}</span>
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-[#f4f1ea]">
+                    <Repeat className="w-4 h-4 text-[#34d399]" />
+                    <span>无感自动结算</span>
+                  </span>
+                  <span className="text-xs text-[#94a3b8] block">
+                    非首通/解锁里程碑与连刷时跳过全屏结算窗，改为战区底栏静默展示
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSilentAutoClear(!settings.silentAutoClear)}
+                  className={`min-h-[42px] min-w-[84px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold border cursor-pointer shrink-0 transition-colors ${
+                    settings.silentAutoClear
+                      ? 'border-[#34d399]/50 bg-[#10b981]/18 text-[#a7f3d0]'
+                      : 'border-[#384166] bg-[#1e2338] text-[#94a3b8] hover:text-white'
+                  }`}
+                >
+                  <span>{settings.silentAutoClear ? '已开启' : '已关闭'}</span>
                 </button>
               </div>
 
@@ -1471,7 +1546,7 @@ export function TribulationsModal({ open, onClose }: { open: boolean; onClose: (
               bestMs !== undefined ? evaluateSpeedrunRank(bestMs, t.order).rank : null;
             const sssReady = Boolean(meta.sssUnlockedAutoRepeat[t.id]);
             const effectiveHp = getBossTotalHp(t.id, meta);
-            const dropMeta = RELIC_TIER_META[t.relicDropTier];
+            const dropOdds = getTribulationEffectiveDropOdds(t.id, meta);
             const prevTrib = idx > 0 ? TRIBULATIONS[idx - 1] : null;
             const prevClears = prevTrib ? meta.clearCounts?.[prevTrib.id] ?? 0 : 0;
 
@@ -1499,10 +1574,21 @@ export function TribulationsModal({ open, onClose }: { open: boolean; onClose: (
                       · {t.baseCrystalReward.toLocaleString()}神晶
                     </span>
                   </div>
-                  <div className="flex items-center gap-2 flex-wrap text-xs">
-                    <span className={`font-semibold ${dropMeta.colorClass}`}>
-                      掉落 [{dropMeta.label}] ×{t.relicDropCount}
+                  <div className="flex items-center gap-1.5 flex-wrap text-xs">
+                    <span className="font-mono-num font-bold text-[#f8fafc]">
+                      掉落 {t.relicDropCount}件:
                     </span>
+                    {dropOdds.map((o) => (
+                      <span
+                        key={o.tier}
+                        className="font-mono-num inline-flex items-baseline gap-0.5"
+                      >
+                        <span className={o.meta.fontClass}>{o.meta.shortLabel}</span>
+                        <span className={o.meta.colorClass}>
+                          {o.effectivePct.toFixed(o.effectivePct < 10 ? 1 : 0)}%
+                        </span>
+                      </span>
+                    ))}
                     <span className="text-[#475569]">·</span>
                     <span className="font-mono-num text-[#94a3b8]">已通关 {clearCount} 次</span>
                   </div>
@@ -1569,7 +1655,9 @@ function computeDpsSnapshot(
       ? getSkillEffectiveValues('sk_clone', run.skills.sk_clone.level, targetMercs, meta)
           .effectValue
       : 0;
-  const heroEstDps = heroStats.expectedHeroClick.mul(heroStats.puppetRate + cloneRateNow);
+  const heroEstDps = heroStats.expectedHeroClick.mul(
+    heroStats.puppetRate * heroStats.puppetOverflowMult + cloneRateNow
+  );
   const poisonEstDps = getPoisonTickExpectedDamage(
     targetMercs,
     run,
@@ -1741,7 +1829,11 @@ export function MercForgeModal({
               </h2>
               <p className="font-mono-num text-xs text-[#94a3b8] mt-0.5">
                 <span className={mercTheme.roleClass}>{arch.roleTag}</span> · 间隔{' '}
-                {computed.interval.toFixed(2)}s · DPS{' '}
+                {computed.interval.toFixed(2)}s
+                {computed.overflowSpdMult > 1
+                  ? ` (25/s转攻×${computed.overflowSpdMult.toFixed(2)})`
+                  : ''}{' '}
+                · DPS{' '}
                 <span className="text-[#e2e8f0] font-semibold">
                   {formatNumber(computed.dpsEstimate, settings.numberMode, true)}/s
                 </span>

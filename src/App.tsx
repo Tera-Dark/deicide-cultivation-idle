@@ -1,5 +1,6 @@
 import { Component, useState, type ReactNode } from 'react';
-import { BossArena } from './components/BossArena';
+import { ChevronDown, ChevronUp } from 'lucide-react';
+import { BossArena, type MobileViewMode } from './components/BossArena';
 import { CompendiumModal } from './components/CompendiumModal';
 import { HeroDaoIcon, MercSwordIcon, RelicHallIcon } from './components/CultivationIcons';
 import {
@@ -88,12 +89,20 @@ const BULK_MODES: { value: BuyMode; label: string }[] = [
 function GameShell() {
   const { toastMessage, meta, settings, setBuyMode } = useGameStore();
   const [activeTab, setActiveTab] = useState<MainTab>('hero');
+  const [mobileViewMode, setMobileViewMode] = useState<MobileViewMode>('balanced');
   const [tribulationsOpen, setTribulationsOpen] = useState(false);
   const [compendiumOpen, setCompendiumOpen] = useState(false);
   const [forgeMercSlotIdx, setForgeMercSlotIdx] = useState<number | null>(null);
   const [guideOpen, setGuideOpen] = useState(false);
   const [restartOpen, setRestartOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+
+  const handleSelectMobileTab = (tabId: MainTab) => {
+    setActiveTab(tabId);
+    if (mobileViewMode === 'arena_focus') {
+      setMobileViewMode('balanced');
+    }
+  };
 
   const bulkSelector = (
     <div
@@ -142,17 +151,20 @@ function GameShell() {
 
         {/* 2. Main Split Workspace */}
         <div className="flex-1 min-h-0 flex flex-col lg:flex-row">
-          {/* Arena: Compact Upper Stage on Mobile, Left Column on Desktop */}
-          <BossArena />
+          {/* Arena: Collapsible/Expandable Upper Stage on Mobile, Left Column on Desktop */}
+          <BossArena
+            mobileViewMode={mobileViewMode}
+            onChangeMobileViewMode={setMobileViewMode}
+          />
 
           {/* Build Workspace: Scrollable Cards + Desktop Top Tabs */}
-          <section className="flex-1 min-h-0 flex flex-col bg-[#111421]">
-            {/* Desktop Tabs + Bulk Bar | Mobile Bulk Utility Header */}
-            <div
-              className={`shrink-0 items-center justify-between gap-2 px-3 py-2 bg-[#151827] border-b border-[#2e3552] ${
-                activeTab === 'relics' ? 'hidden lg:flex' : 'flex'
-              }`}
-            >
+          <section
+            className={`${
+              mobileViewMode === 'arena_focus' ? 'shrink-0 lg:flex-1' : 'flex-1 min-h-0'
+            } flex flex-col bg-[#111421]`}
+          >
+            {/* Desktop Tabs + Bulk Bar | Mobile Expand/Collapse + Bulk Utility Header */}
+            <div className="shrink-0 flex items-center justify-between gap-2 px-3 py-1.5 bg-[#151827] border-b border-[#2e3552]">
               {/* Desktop Tabs */}
               <nav
                 aria-label="主构筑分页"
@@ -178,15 +190,70 @@ function GameShell() {
                 })}
               </nav>
 
-              {/* Mobile Section Label beside Bulk Bar */}
-              <div className="lg:hidden text-xs font-display font-bold tracking-wide text-[#94a3b8] truncate">
-                {activeTab === 'hero' ? '批量强化倍率' : '护法批量升级'}
+              {/* Mobile Expand/Collapse Controls */}
+              <div className="lg:hidden flex items-center gap-1.5 min-w-0">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setMobileViewMode((m) => (m === 'arena_focus' ? 'balanced' : 'arena_focus'))
+                  }
+                  className={`min-h-[34px] inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                    mobileViewMode === 'arena_focus'
+                      ? 'bg-[#06b6d4]/25 border-[#22d3ee]/60 text-[#67e8f9]'
+                      : 'bg-[#101322] border-[#2e3552] text-[#cbd5e1] hover:text-white'
+                  }`}
+                >
+                  {mobileViewMode === 'arena_focus' ? (
+                    <>
+                      <ChevronUp className="w-3.5 h-3.5" />
+                      <span>展开构筑</span>
+                    </>
+                  ) : (
+                    <>
+                      <ChevronDown className="w-3.5 h-3.5" />
+                      <span>收起构筑</span>
+                    </>
+                  )}
+                </button>
+                {mobileViewMode !== 'arena_focus' && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setMobileViewMode((m) => (m === 'build_focus' ? 'balanced' : 'build_focus'))
+                    }
+                    className={`min-h-[34px] inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                      mobileViewMode === 'build_focus'
+                        ? 'bg-[#a855f7]/25 border-[#c084fc]/60 text-[#e9d5ff]'
+                        : 'bg-[#101322] border-[#2e3552] text-[#94a3b8] hover:text-white'
+                    }`}
+                  >
+                    {mobileViewMode === 'build_focus' ? (
+                      <>
+                        <ChevronDown className="w-3.5 h-3.5" />
+                        <span>展开战区</span>
+                      </>
+                    ) : (
+                      <>
+                        <ChevronUp className="w-3.5 h-3.5" />
+                        <span>全屏构筑</span>
+                      </>
+                    )}
+                  </button>
+                )}
               </div>
 
-              {activeTab !== 'relics' ? bulkSelector : <div className="hidden lg:block" />}
+              {activeTab !== 'relics' && mobileViewMode !== 'arena_focus' ? (
+                bulkSelector
+              ) : (
+                <div className="hidden lg:block" />
+              )}
             </div>
 
-            <div className="flex-1 min-h-0 overflow-y-auto custom-scroll p-3 space-y-2.5">
+            <div
+              className={`${
+                mobileViewMode === 'arena_focus' ? 'hidden lg:block' : 'block'
+              } flex-1 min-h-0 overflow-y-auto custom-scroll p-3 space-y-2.5`}
+            >
               {activeTab === 'hero' && <TabHero />}
               {activeTab === 'mercs' && (
                 <TabMercenaries
@@ -205,13 +272,13 @@ function GameShell() {
           className="lg:hidden shrink-0 grid grid-cols-3 gap-1.5 px-2.5 py-2 bg-[#151827] border-t border-[#2e3552] pb-safe"
         >
           {TABS.map((t) => {
-            const active = activeTab === t.id;
+            const active = activeTab === t.id && mobileViewMode !== 'arena_focus';
             return (
               <button
                 key={t.id}
                 type="button"
-                onClick={() => setActiveTab(t.id)}
-                className={`min-h-[48px] flex items-center justify-center gap-1.5 px-2 rounded-xl text-[13px] font-bold transition-colors whitespace-nowrap cursor-pointer ${
+                onClick={() => handleSelectMobileTab(t.id)}
+                className={`min-h-[46px] flex items-center justify-center gap-1.5 px-2 rounded-xl text-[13px] font-bold transition-colors whitespace-nowrap cursor-pointer ${
                   active
                     ? 'bg-[#06b6d4]/22 text-[#67e8f9] border border-[#22d3ee]/60 shadow-[0_0_14px_rgba(6,182,212,0.18)]'
                     : 'bg-[#101322]/70 text-[#94a3b8] hover:text-white border border-white/6'

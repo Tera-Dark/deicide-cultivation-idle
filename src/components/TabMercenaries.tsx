@@ -32,7 +32,16 @@ export function TabMercenaries({
   onOpenForgeModal: (slotIndex: number) => void;
   onOpenGuideModal: () => void;
 }) {
-  const { run, mercs, meta, settings, unlockMercSlot, upgradeMercenary } = useGameStore();
+  const {
+    run,
+    mercs,
+    meta,
+    settings,
+    unlockMercSlot,
+    upgradeMercenary,
+    toggleAutoSetting,
+    toggleAutoMercSlot,
+  } = useGameStore();
 
   const stones = toDecimal(run.spiritStones);
   const crystals = toDecimal(meta.divineCrystals);
@@ -44,16 +53,38 @@ export function TabMercenaries({
 
   return (
     <div className="space-y-2.5">
-      {/* Top Helper & Build Guide Entry */}
-      <div className="flex items-center justify-between gap-2 px-0.5 text-xs text-[#a3b1cc]">
-        <button
-          type="button"
-          onClick={onOpenGuideModal}
-          className="inline-flex items-center gap-1.5 min-h-[40px] px-3.5 py-2 rounded-lg bg-[#181d31] border border-[#38bdf8]/45 text-[#7dd3fc] font-bold hover:bg-[#06b6d4]/20 transition-colors cursor-pointer"
-        >
-          <BookOpen className="w-4 h-4 shrink-0" />
-          <span>流派协同指南</span>
-        </button>
+      {/* Top Helper, Auto-Merc Master Toggle & Build Guide Entry */}
+      <div className="flex items-center justify-between gap-2 flex-wrap px-0.5 text-xs text-[#a3b1cc]">
+        <div className="flex items-center gap-2 flex-wrap">
+          <button
+            type="button"
+            onClick={onOpenGuideModal}
+            className="inline-flex items-center gap-1.5 min-h-[42px] px-3.5 py-2 rounded-lg bg-[#181d31] border border-[#38bdf8]/45 text-[#7dd3fc] font-bold hover:bg-[#06b6d4]/20 transition-colors cursor-pointer"
+          >
+            <BookOpen className="w-4 h-4 shrink-0" />
+            <span>流派协同指南</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => toggleAutoSetting('autoMercs')}
+            className={`inline-flex items-center gap-1.5 min-h-[42px] px-3.5 py-2 rounded-lg border font-bold transition-colors cursor-pointer whitespace-nowrap ${
+              !meta.unlockedAutoMercUpgrade
+                ? 'bg-[#101322] border-[#2e3552] text-[#64748b]'
+                : meta.autoSettings.autoMercs
+                  ? 'bg-[#10b981]/22 border-[#34d399]/60 text-[#ecfdf5]'
+                  : 'bg-[#181d31] border-[#384166] text-[#cbd5e1] hover:text-white'
+            }`}
+          >
+            <span>
+              {!meta.unlockedAutoMercUpgrade
+                ? '自动升级 (劫6解锁)'
+                : meta.autoSettings.autoMercs
+                  ? '护法自动升级：开'
+                  : '护法自动升级：关'}
+            </span>
+          </button>
+        </div>
         <span className="font-mono-num text-xs font-bold text-[#fbbf24] shrink-0">
           保底气运 {meta.rerollPity}/10
         </span>
@@ -197,6 +228,11 @@ export function TabMercenaries({
                   <span className="font-bold text-[#e2e8f0]">
                     {formatNumber(computed.dpsEstimate, settings.numberMode, true)}/s
                   </span>
+                  {computed.overflowSpdMult > 1 && (
+                    <span className="text-[#fbbf24] font-semibold shrink-0">
+                      · 25/s转攻×{computed.overflowSpdMult.toFixed(2)}
+                    </span>
+                  )}
                   <span className="text-[#64748b]">·</span>
                   <span className="text-[#fde047] font-display font-bold truncate">
                     ★ {innateCfg.name}
@@ -268,26 +304,42 @@ export function TabMercenaries({
               )}
             </div>
 
-            {/* Dedicated 44px+ Forge Trigger Bar */}
-            <button
-              type="button"
-              onClick={() => onOpenForgeModal(idx)}
-              className={`w-full min-h-[44px] px-3 py-2 rounded-lg border flex items-center justify-between gap-2 text-xs font-semibold transition-colors cursor-pointer ${
-                hasPending
-                  ? 'bg-[#f59e0b]/18 border-[#fbbf24]/65 text-[#fef08a]'
-                  : 'bg-[#101322] border-[#2e3552] text-[#cbd5e1] hover:border-[#38bdf8]/55 hover:text-white'
-              }`}
-            >
-              <span className="inline-flex items-center gap-1.5 truncate">
-                <SlidersHorizontal className="w-3.5 h-3.5 text-[#38bdf8] shrink-0" />
-                <span className="truncate">
-                  {hasPending
-                    ? '有待确认的洗练对比结果'
-                    : `道纹洗练 (${slot.unlockedLevelSlots}/10槽${nextThreshold ? ` · 下槽 Lv.${nextThreshold}` : ''})`}
+            {/* Dedicated 44px+ Forge Trigger + Per-Slot Auto Upgrade Toggle */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => onOpenForgeModal(idx)}
+                className={`flex-1 min-w-0 min-h-[44px] px-3 py-2 rounded-lg border flex items-center justify-between gap-2 text-xs font-semibold transition-colors cursor-pointer ${
+                  hasPending
+                    ? 'bg-[#f59e0b]/18 border-[#fbbf24]/65 text-[#fef08a]'
+                    : 'bg-[#101322] border-[#2e3552] text-[#cbd5e1] hover:border-[#38bdf8]/55 hover:text-white'
+                }`}
+              >
+                <span className="inline-flex items-center gap-1.5 truncate">
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-[#38bdf8] shrink-0" />
+                  <span className="truncate">
+                    {hasPending
+                      ? '有待确认的洗练对比结果'
+                      : `道纹洗练 (${slot.unlockedLevelSlots}/10槽${nextThreshold ? ` · 下槽 Lv.${nextThreshold}` : ''})`}
+                  </span>
                 </span>
-              </span>
-              <span className="text-[#7dd3fc] shrink-0 whitespace-nowrap">管理与洗练 →</span>
-            </button>
+                <span className="text-[#7dd3fc] shrink-0 whitespace-nowrap">洗练 →</span>
+              </button>
+
+              {meta.unlockedAutoMercUpgrade && (
+                <button
+                  type="button"
+                  onClick={() => toggleAutoMercSlot(idx)}
+                  className={`min-h-[44px] px-3 py-2 rounded-lg border text-xs font-bold shrink-0 whitespace-nowrap transition-colors cursor-pointer ${
+                    meta.autoSettings.autoMercSlots[idx]
+                      ? 'bg-[#10b981]/20 border-[#34d399]/55 text-[#a7f3d0]'
+                      : 'bg-[#101322] border-[#2e3552] text-[#64748b] hover:text-white'
+                  }`}
+                >
+                  {meta.autoSettings.autoMercSlots[idx] ? '自动:开' : '自动:关'}
+                </button>
+              )}
+            </div>
           </div>
         );
       })}

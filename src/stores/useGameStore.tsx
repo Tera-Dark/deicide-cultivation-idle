@@ -14,15 +14,28 @@ import {
   BASE_START_MANA,
   ENLIGHTENMENT_BASE_COST,
   ENLIGHTENMENT_COST_GROWTH,
+  FLOATING_TEXT_MIN_INTERVAL_MS,
   LEVEL_SLOT_THRESHOLDS,
+  MAX_ATTACKS_PER_SEC,
+  MAX_ONSCREEN_FLOATING_TEXTS,
+  MAX_ONSCREEN_RIPPLES,
   MERC_SLOT_CRYSTAL_COSTS,
+  PHASE_BANNER_MIN_INTERVAL_MS,
   PUPPET_COST_GROWTH,
   PUPPET_MAX_LEVEL,
   PUPPET_UNLOCK_COST,
   REALM_TIERS,
+  RIPPLE_MIN_INTERVAL_MS,
   SKILLS,
+  TOAST_DURATION_MS,
 } from '../config/constants';
-import { RELICS, RELIC_MAP, RELIC_TIER_META, getRelicLevelsBreakdown } from '../config/relics';
+import {
+  RELICS,
+  RELIC_MAP,
+  RELIC_TIER_META,
+  getRelicLevelsBreakdown,
+  rollTribulationRelicTier,
+} from '../config/relics';
 import {
   evaluateSpeedrunRank,
   getCostReductionMult,
@@ -37,6 +50,7 @@ import {
   getPhaseMaxHp,
   getPoisonTickExpectedDamage,
   getRealmInfo,
+  getRelicCrystalBonusMult,
   getRelicTotalLv,
   getSkillEffectiveValues,
   getSpiritStoneMultiplier,
@@ -49,6 +63,7 @@ import { calculateBulkUpgrade, formatNumber, toDecimal } from '../core/formatNum
 import type {
   AffixInstance,
   ArchetypeId,
+  AutoUpgradeSettings,
   BuyMode,
   ClickRipple,
   FloatingDamageText,
@@ -62,6 +77,7 @@ import type {
   RelicId,
   RunState,
   SettingsState,
+  SilentClearReport,
   SkillId,
   TribulationId,
   TutorialNodeId,
@@ -124,6 +140,17 @@ export function createInitialMetaState(): MetaState {
     unlockedInnateReroll: false,
     unlockedEpicPool: false,
     unlockedAutoSkill: false,
+    unlockedAutoRealm: false,
+    unlockedAutoHeroUpgrades: false,
+    unlockedAutoMercUpgrade: false,
+    autoSettings: {
+      autoRealm: false,
+      autoPuppet: false,
+      autoEnlightenment: false,
+      autoSkills: false,
+      autoMercs: false,
+      autoMercSlots: [true, true, true, true, true],
+    },
     hasSeenIntro: false,
     shownTutorials: {
       tut_phase1: false,
@@ -190,8 +217,8 @@ export function createInitialRunState(
   const startStones =
     startGoldCrystalLv + startGoldDropLv > 0
       ? new Decimal(500)
-          .mul(Decimal.pow(3, startGoldCrystalLv))
-          .mul(1 + 0.5 * startGoldDropLv)
+          .mul(Decimal.pow(1.65, startGoldCrystalLv))
+          .mul(1 + 0.35 * startGoldDropLv)
       : new Decimal(0);
 
   const hourglassCrystalLv = meta.relicLevels.rel_e_auto_start ?? 0;
@@ -199,12 +226,12 @@ export function createInitialRunState(
   const hourglassTotalLv = hourglassCrystalLv + hourglassDropLv;
   const startAccumulated =
     hourglassTotalLv > 0
-      ? new Decimal(1000)
-          .mul(Decimal.pow(2, hourglassCrystalLv))
-          .mul(1 + 0.5 * hourglassDropLv)
+      ? new Decimal(800)
+          .mul(Decimal.pow(1.5, hourglassCrystalLv))
+          .mul(1 + 0.35 * hourglassDropLv)
       : new Decimal(0);
   const freePuppetLv =
-    hourglassTotalLv > 0 ? Math.min(PUPPET_MAX_LEVEL, 5 * hourglassTotalLv) : 0;
+    hourglassTotalLv > 0 ? Math.min(PUPPET_MAX_LEVEL, 3 * hourglassTotalLv) : 0;
 
   return {
     tribulationId,
@@ -248,6 +275,7 @@ export function createInitialRunState(
         autoCast: prevSkillAutoCast?.sk_sync ?? false,
       },
     },
+    manaSpentThisRun: 0,
     heroBuffStacks: [],
     timerStarted: false,
     elapsedMs: 0,
@@ -359,6 +387,26 @@ function sanitizeMetaState(raw: Partial<MetaState> | undefined, defaultMeta: Met
     unlockedInnateReroll: Boolean(src.unlockedInnateReroll),
     unlockedEpicPool: Boolean(src.unlockedEpicPool),
     unlockedAutoSkill: Boolean(src.unlockedAutoSkill),
+    unlockedAutoRealm: Boolean(src.unlockedAutoRealm || clearedTribulations.tier_3),
+    unlockedAutoHeroUpgrades: Boolean(src.unlockedAutoHeroUpgrades || clearedTribulations.tier_5),
+    unlockedAutoMercUpgrade: Boolean(src.unlockedAutoMercUpgrade || clearedTribulations.tier_6),
+    autoSettings: {
+      autoRealm: Boolean(src.autoSettings?.autoRealm),
+      autoPuppet: Boolean(src.autoSettings?.autoPuppet),
+      autoEnlightenment: Boolean(src.autoSettings?.autoEnlightenment),
+      autoSkills: Boolean(src.autoSettings?.autoSkills),
+      autoMercs: Boolean(src.autoSettings?.autoMercs),
+      autoMercSlots:
+        Array.isArray(src.autoSettings?.autoMercSlots) && src.autoSettings.autoMercSlots.length === 5
+          ? (src.autoSettings.autoMercSlots.map(Boolean) as [
+              boolean,
+              boolean,
+              boolean,
+              boolean,
+              boolean,
+            ])
+          : [true, true, true, true, true],
+    },
     hasSeenIntro: Boolean(src.hasSeenIntro),
     shownTutorials: {
       ...defaultMeta.shownTutorials,
@@ -455,6 +503,7 @@ function loadSavedState(): {
     floatingTextMode: 'all',
     hitVfxEnabled: true,
     vibrationEnabled: true,
+    silentAutoClear: true,
   };
 
   try {
@@ -492,6 +541,10 @@ function loadSavedState(): {
       vibrationEnabled:
         typeof parsed.settings?.vibrationEnabled === 'boolean'
           ? parsed.settings.vibrationEnabled
+          : true,
+      silentAutoClear:
+        typeof parsed.settings?.silentAutoClear === 'boolean'
+          ? parsed.settings.silentAutoClear
           : true,
     };
 
@@ -538,6 +591,7 @@ function loadSavedState(): {
         sk_thunder: { ...baseRun.skills.sk_thunder, ...(parsed.run?.skills?.sk_thunder ?? {}) },
         sk_sync: { ...baseRun.skills.sk_sync, ...(parsed.run?.skills?.sk_sync ?? {}) },
       },
+      manaSpentThisRun: safeFloat(parsed.run?.manaSpentThisRun, 0, 0),
       heroBuffStacks: Array.isArray(parsed.run?.heroBuffStacks)
         ? parsed.run.heroBuffStacks.filter(
             (b) =>
@@ -594,10 +648,13 @@ interface GameContextValue {
   hitPulseId: number;
   shellShatterId: number;
   victorySummary: VictorySummary | null;
+  lastClearReport: SilentClearReport | null;
   autoRepeatCountdown: number | null;
   toastMessage: string | null;
   activeTutorial: TutorialNodeId | null;
   clearVictorySummary: () => void;
+  openLastClearReportModal: () => void;
+  quickRestartAfterSilentClear: () => void;
   completeIntro: () => void;
   replayIntro: () => void;
   dismissTutorial: () => void;
@@ -623,6 +680,8 @@ interface GameContextValue {
 
   switchTribulation: (tribId: TribulationId) => void;
   toggleAutoRepeat: () => void;
+  toggleAutoSetting: (key: keyof Omit<AutoUpgradeSettings, 'autoMercSlots'>) => void;
+  toggleAutoMercSlot: (slotIndex: number) => void;
   restartRun: () => void;
 
   setBuyMode: (mode: BuyMode) => void;
@@ -631,6 +690,7 @@ interface GameContextValue {
   setFloatingTextMode: (mode: FloatingTextMode) => void;
   setHitVfxEnabled: (enabled: boolean) => void;
   setVibrationEnabled: (enabled: boolean) => void;
+  setSilentAutoClear: (enabled: boolean) => void;
   lastSavedAt: number;
   saveNow: () => void;
   exportSaveString: () => string;
@@ -663,6 +723,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [hitPulseId, setHitPulseId] = useState(0);
   const [shellShatterId, setShellShatterId] = useState(0);
   const [victorySummary, setVictorySummary] = useState<VictorySummary | null>(null);
+  const [lastClearReport, setLastClearReport] = useState<SilentClearReport | null>(null);
   const [autoRepeatCountdown, setAutoRepeatCountdown] = useState<number | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [activeTutorial, setActiveTutorial] = useState<TutorialNodeId | null>(null);
@@ -680,8 +741,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const puppetAccRef = useRef(0);
   const cloneAccRef = useRef(0);
   const poisonTickAccRef = useRef(0);
+  const autoBuyAccRef = useRef(0);
   const floatIdRef = useRef(1);
   const rippleIdRef = useRef(1);
+  const lastFloatSpawnRef = useRef(0);
+  const lastRippleSpawnRef = useRef(0);
+  const lastBannerAtRef = useRef(0);
+  const lastToastRef = useRef<{ msg: string; at: number }>({ msg: '', at: 0 });
   const bannerTimerRef = useRef<number | null>(null);
   const squashTimerRef = useRef<number | null>(null);
   const shakeTimerRef = useRef<number | null>(null);
@@ -696,9 +762,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   }, [settings.soundEnabled]);
 
   const showToast = useCallback((msg: string) => {
+    const now = performance.now();
+    if (msg === lastToastRef.current.msg && now - lastToastRef.current.at < 1500) {
+      return;
+    }
+    lastToastRef.current = { msg, at: now };
     setToastMessage(msg);
     if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
-    toastTimerRef.current = window.setTimeout(() => setToastMessage(null), 3200);
+    toastTimerRef.current = window.setTimeout(() => setToastMessage(null), TOAST_DURATION_MS);
   }, []);
 
   const triggerVibration = useCallback((pattern: number | number[]) => {
@@ -742,9 +813,15 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   const spawnClickRipple = useCallback((xPct: number, yPct: number) => {
     if (!settingsRef.current.hitVfxEnabled) return;
+    const now = performance.now();
+    if (now - lastRippleSpawnRef.current < RIPPLE_MIN_INTERVAL_MS) return;
+    lastRippleSpawnRef.current = now;
     const id = rippleIdRef.current++;
     setClickRipples((prev) => {
-      const next = prev.length >= 10 ? prev.slice(prev.length - 9) : prev;
+      const next =
+        prev.length >= MAX_ONSCREEN_RIPPLES
+          ? prev.slice(prev.length - (MAX_ONSCREEN_RIPPLES - 1))
+          : prev;
       return [...next, { id, x: xPct, y: yPct }];
     });
     window.setTimeout(() => {
@@ -759,11 +836,20 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       if (mode === 'crit' && kind !== 'crit' && kind !== 'thunder' && kind !== 'shell') {
         return;
       }
+      const now = performance.now();
+      const isPriority = kind === 'shell' || kind === 'thunder';
+      if (!isPriority && now - lastFloatSpawnRef.current < FLOATING_TEXT_MIN_INTERVAL_MS) {
+        return;
+      }
+      lastFloatSpawnRef.current = now;
       const id = floatIdRef.current++;
       const x = xPct ?? 30 + Math.random() * 40;
       const y = yPct ?? 24 + Math.random() * 34;
       setFloatingTexts((prev) => {
-        const next = prev.length >= 25 ? prev.slice(prev.length - 24) : prev;
+        const next =
+          prev.length >= MAX_ONSCREEN_FLOATING_TEXTS
+            ? prev.slice(prev.length - (MAX_ONSCREEN_FLOATING_TEXTS - 1))
+            : prev;
         return [...next, { id, x, y, text, kind }];
       });
       window.setTimeout(() => {
@@ -815,6 +901,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       let phase = nextRun.phaseIndex;
       const firstAffixRelicLv = getRelicTotalLv(nextMeta, 'rel_m_first_affix');
 
+      let lastBrokenPhaseNumber = 0;
+      let totalStonesEarnedInBreak = 0;
+
       let safety = 0;
       while (remaining.gt(0) && phase < BOSS_SHELLS.length && safety < 12) {
         safety++;
@@ -850,11 +939,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           }
 
           nextMeta.affixStones += stonesGain;
-
-          const bannerId = floatIdRef.current++;
-          setPhaseBreakBanner({ id: bannerId, phase: brokenPhaseNumber, stones: stonesGain });
-          if (bannerTimerRef.current) window.clearTimeout(bannerTimerRef.current);
-          bannerTimerRef.current = window.setTimeout(() => setPhaseBreakBanner(null), 1850);
+          lastBrokenPhaseNumber = brokenPhaseNumber;
+          totalStonesEarnedInBreak += stonesGain;
 
           // First-break one-time onboarding gifts
           const grantFirstBreakForPhase = (pNum: number) => {
@@ -906,9 +992,50 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
             const nextMax = getPhaseMaxHp(nextRun.tribulationId, phase, nextMeta);
             hp = nextMax;
             nextRun.bossMaxHp = nextMax.toString();
+
+            // rel_y_shell_burst: shatter shockwave deals (1.0 * lv) seconds of team DPS to the newly exposed shell
+            const shellBurstLv = getRelicTotalLv(nextMeta, 'rel_y_shell_burst');
+            if (shellBurstLv > 0) {
+              const curTeamDps = toDecimal(nextRun.recentTickDps.hero)
+                .add(toDecimal(nextRun.recentTickDps.poison))
+                .add(
+                  nextRun.recentTickDps.mercs.reduce(
+                    (acc, v) => acc.add(toDecimal(v)),
+                    new Decimal(0)
+                  )
+                );
+              if (curTeamDps.gt(0)) {
+                remaining = remaining.add(curTeamDps.mul(1.0 * shellBurstLv));
+              }
+            }
+
+            // rel_s_stone_surge: instant stone rebate on shell break (max 25%)
+            const stoneSurgeLv = getRelicTotalLv(nextMeta, 'rel_s_stone_surge');
+            if (stoneSurgeLv > 0) {
+              const curStones = toDecimal(nextRun.spiritStones);
+              const bonusStones = curStones.mul(Math.min(0.25, 0.01 * stoneSurgeLv));
+              if (bonusStones.gt(0)) {
+                nextRun.spiritStones = curStones.add(bonusStones).toString();
+              }
+            }
           }
         } else {
           break;
+        }
+      }
+
+      if (shellsBroken > 0 && lastBrokenPhaseNumber > 0) {
+        const nowBanner = performance.now();
+        if (nowBanner - lastBannerAtRef.current >= PHASE_BANNER_MIN_INTERVAL_MS) {
+          lastBannerAtRef.current = nowBanner;
+          const bannerId = floatIdRef.current++;
+          setPhaseBreakBanner({
+            id: bannerId,
+            phase: lastBrokenPhaseNumber,
+            stones: totalStonesEarnedInBreak,
+          });
+          if (bannerTimerRef.current) window.clearTimeout(bannerTimerRef.current);
+          bannerTimerRef.current = window.setTimeout(() => setPhaseBreakBanner(null), 1500);
         }
       }
 
@@ -1029,14 +1156,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         bonusRelicLevels: speedBonusDrops,
       } = evaluateSpeedrunRank(clearTimeMs, trib.order);
 
-      const infCrystalLv = getRelicTotalLv(m, 'rel_e_inf_crystal');
+      const crystalBonusMult = getRelicCrystalBonusMult(m);
       const ngMult =
         trib.id === 'tier_10' && m.ngPlusCount > 0 ? Decimal.pow(2, m.ngPlusCount) : new Decimal(1);
 
       const crystalsEarned = new Decimal(trib.baseCrystalReward)
         .mul(ngMult)
         .mul(crystalMult)
-        .mul(1 + 0.18 * infCrystalLv)
+        .mul(crystalBonusMult)
         .floor();
 
       m.divineCrystals = toDecimal(m.divineCrystals).add(crystalsEarned).toString();
@@ -1067,22 +1194,37 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           m.unlockedAffixLock = true;
           m.unlockedInnateReroll = true;
         }
-        if (trib.id === 'tier_3') m.unlockedEpicPool = true;
+        if (trib.id === 'tier_3') {
+          m.unlockedEpicPool = true;
+          m.unlockedAutoRealm = true;
+        }
         if (trib.id === 'tier_4') m.unlockedAutoSkill = true;
-        if (trib.id === 'tier_5') m.affixStones += 50;
+        if (trib.id === 'tier_5') {
+          m.affixStones += 50;
+          m.unlockedAutoHeroUpgrades = true;
+        }
+        if (trib.id === 'tier_6') {
+          m.unlockedAutoMercUpgrade = true;
+        }
       }
 
-      // Deterministic Tribulation Clear Relic Drops into infinite relicDropLevels (or rarity crystals if special-capped)
+      // Linear drop count (1..10) + speedrun bonus + NG+ + 造化仙冕 extra roll
+      const crownLv = getRelicTotalLv(m, 'rel_e_rarity_crown');
+      const crownExtraDrop =
+        crownLv > 0 && Math.random() < Math.min(0.4, 0.015 * crownLv) ? 1 : 0;
+
       const totalDropRolls =
         trib.relicDropCount +
         speedBonusDrops +
+        crownExtraDrop +
         (trib.id === 'tier_10' ? Math.min(3, Number(m.ngPlusCount) || 0) : 0);
 
-      const tierRelics = RELICS.filter((r) => r.tier === trib.relicDropTier);
       const dropAgg: Partial<Record<RelicId, { levelsAdded: number; wasNew: boolean }>> = {};
       const overflowAgg: Partial<Record<RelicId, { count: number; crystals: Decimal }>> = {};
 
       for (let d = 0; d < totalDropRolls; d++) {
+        const rolledTier = rollTribulationRelicTier(trib.id, m);
+        const tierRelics = RELICS.filter((r) => r.tier === rolledTier);
         const unowned = tierRelics.filter((r) => getRelicTotalLv(m, r.id) === 0);
         const picked =
           unowned.length > 0
@@ -1097,10 +1239,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
         if (picked.maxDropLevel !== null && prevDropLv >= picked.maxDropLevel) {
           const tierBase = RELIC_TIER_META[picked.tier].overflowBaseCrystals;
-          const gain = new Decimal(tierBase)
-            .mul(ngMult)
-            .mul(1 + 0.18 * infCrystalLv)
-            .floor();
+          const gain = new Decimal(tierBase).mul(ngMult).mul(crystalBonusMult).floor();
           const curOv = overflowAgg[picked.id];
           overflowAgg[picked.id] = {
             count: (curOv?.count ?? 0) + 1,
@@ -1182,10 +1321,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       metaRef.current = m;
       setMeta(m);
-      soundEngine.playVictory();
       saveToLocalStorage();
 
-      setVictorySummary({
+      const summary: VictorySummary = {
         tribulationId: trib.id,
         tribulationName: trib.name,
         clearTimeMs,
@@ -1202,17 +1340,76 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         unlockedNextOrder,
         unlockedSssAutoRepeat,
         nextUnlockProgress,
-      });
+      };
 
-      if (m.autoRepeatEnabled && m.sssUnlockedAutoRepeat[trib.id]) {
-        autoRepeatCountdownRef.current = 2.0;
-        setAutoRepeatCountdown(2.0);
+      const isAutoLoop = m.autoRepeatEnabled && Boolean(m.sssUnlockedAutoRepeat[trib.id]);
+      const isFirstMilestone = Boolean(firstClearNote || unlockedSssAutoRepeat);
+
+      if (isAutoLoop) {
+        setVictorySummary(null);
+        setLastClearReport((prev) => ({
+          tribulationId: trib.id,
+          tribulationName: trib.name,
+          clearTimeMs,
+          rank,
+          crystalsEarned: crystalsEarned.toString(),
+          dropCount: totalDropRolls,
+          overflowCrystals: overflowCrystalBonus.toString(),
+          unlockedNextOrder,
+          autoRepeatRound: prev && prev.tribulationId === trib.id ? prev.autoRepeatRound + 1 : 1,
+          updatedAt: Date.now(),
+          summary,
+        }));
+        autoRepeatCountdownRef.current = 0.25;
+        setAutoRepeatCountdown(0.25);
+        if (clearTimeMs >= 3000) {
+          soundEngine.playVictory();
+        }
+        if (unlockedNextOrder !== null) {
+          showToast(`破禁飞升！已解锁【劫数 ${unlockedNextOrder}】挑战权限！`);
+        }
+      } else if (settingsRef.current.silentAutoClear && !isFirstMilestone) {
+        setVictorySummary(null);
+        setLastClearReport({
+          tribulationId: trib.id,
+          tribulationName: trib.name,
+          clearTimeMs,
+          rank,
+          crystalsEarned: crystalsEarned.toString(),
+          dropCount: totalDropRolls,
+          overflowCrystals: overflowCrystalBonus.toString(),
+          unlockedNextOrder,
+          autoRepeatRound: 0,
+          updatedAt: Date.now(),
+          summary,
+        });
+        autoRepeatCountdownRef.current = null;
+        setAutoRepeatCountdown(null);
+        soundEngine.playVictory();
+        if (unlockedNextOrder !== null) {
+          showToast(`破禁飞升！已解锁【劫数 ${unlockedNextOrder}】挑战权限！`);
+        }
       } else {
+        soundEngine.playVictory();
+        setVictorySummary(summary);
+        setLastClearReport({
+          tribulationId: trib.id,
+          tribulationName: trib.name,
+          clearTimeMs,
+          rank,
+          crystalsEarned: crystalsEarned.toString(),
+          dropCount: totalDropRolls,
+          overflowCrystals: overflowCrystalBonus.toString(),
+          unlockedNextOrder,
+          autoRepeatRound: 0,
+          updatedAt: Date.now(),
+          summary,
+        });
         autoRepeatCountdownRef.current = null;
         setAutoRepeatCountdown(null);
       }
     },
-    [queueTutorial, saveToLocalStorage]
+    [queueTutorial, saveToLocalStorage, showToast]
   );
 
   // Execute a Mercenary attack (single volley; anti-recursion enforced!)
@@ -1427,7 +1624,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       clickCount: number,
       clickSource: 'manual' | 'clone' | 'puppet',
       xPct?: number,
-      yPct?: number
+      yPct?: number,
+      clickDmgMult = 1
     ): { dealt: Decimal; shellsBroken: number } => {
       if (clickCount <= 0 || nextRun.runCompleted) {
         return { dealt: new Decimal(0), shellsBroken: 0 };
@@ -1484,7 +1682,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           .mul(isCrit ? heroStats.heroCritDmgMult : 1)
           .mul(clickCount);
       } else {
-        totalClickDmg = heroStats.expectedHeroClick.mul(clickCount);
+        totalClickDmg = heroStats.expectedHeroClick.mul(clickCount).mul(clickDmgMult);
       }
 
       const res = applyBossDamageAndCheckBreaks(nextRun, nextMercs, nextMeta, totalClickDmg);
@@ -1556,6 +1754,49 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
+      // Every 10 cumulative clicks -> rel_e_click_storm coordinated team strike
+      const clickStormLv = getRelicTotalLv(nextMeta, 'rel_e_click_storm');
+      if (clickStormLv > 0 && !nextRun.runCompleted) {
+        const rawTrig10 = newStacks.div(10).floor().sub(oldStacks.div(10).floor()).toNumber();
+        const triggersCrossed10 = Number.isFinite(rawTrig10)
+          ? Math.max(0, Math.min(5, Math.floor(rawTrig10)))
+          : 5;
+        if (triggersCrossed10 > 0) {
+          const globalNow = getGlobalMult(nextRun, nextMercs, nextMeta);
+          let volleyDmg = new Decimal(0);
+          for (let idx = 0; idx < nextMercs.length; idx++) {
+            const m = nextMercs[idx];
+            if (!m.unlocked || m.level <= 0) continue;
+            const st = getMercenaryComputedStats(
+              idx,
+              nextMercs,
+              nextRun,
+              nextMeta,
+              heroStats.heroBasePower,
+              heroStats.rawHeroClick,
+              globalNow
+            );
+            volleyDmg = volleyDmg.add(st.expectedDmg.mul(0.1 * clickStormLv));
+          }
+          if (volleyDmg.gt(0)) {
+            const stormRes = applyBossDamageAndCheckBreaks(
+              nextRun,
+              nextMercs,
+              nextMeta,
+              volleyDmg.mul(triggersCrossed10)
+            );
+            if (clickSource === 'manual' && stormRes.actualDealt.gt(0)) {
+              spawnFloatingText(
+                `万道合击 -${formatNumber(stormRes.actualDealt, settingsRef.current.numberMode)}`,
+                'crit',
+                54,
+                32
+              );
+            }
+          }
+        }
+      }
+
       return { dealt: res.actualDealt, shellsBroken: res.shellsBroken };
     },
     [
@@ -1585,6 +1826,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       if (nextRun.mana < eff.manaCost) return false;
 
       nextRun.mana -= eff.manaCost;
+      nextRun.manaSpentThisRun = (nextRun.manaSpentThisRun ?? 0) + cfg.manaCost;
       nextRun.skills[skillId] = {
         ...skState,
         activeRemaining: eff.duration,
@@ -1708,29 +1950,50 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         nextRun.bossHp = Decimal.min(maxHp, curHp.add(regen)).toString();
       }
 
-      // Puppet auto-clicks (25% atk growth)
+      // Puppet auto-clicks (25% atk growth, capped at 25/s with excess converted 1:1 into damage)
       if (heroStats.puppetRate > 0 && !nextRun.runCompleted) {
         puppetAccRef.current += heroStats.puppetRate * dt;
         const hits = Math.floor(puppetAccRef.current);
         if (hits > 0) {
           puppetAccRef.current -= hits;
-          applyHeroClicks(nextRun, nextMercs, nextMeta, hits, 'puppet');
+          applyHeroClicks(
+            nextRun,
+            nextMercs,
+            nextMeta,
+            hits,
+            'puppet',
+            undefined,
+            undefined,
+            heroStats.puppetOverflowMult
+          );
         }
       }
 
-      // Skill 2 Clone clicks (100% atk growth)
+      // Skill 2 Clone clicks (100% atk growth, capped at 25/s with excess converted 1:1 into damage)
       if (nextRun.skills.sk_clone.activeRemaining > 0 && !nextRun.runCompleted) {
-        const cloneRate = getSkillEffectiveValues(
+        const rawCloneRate = getSkillEffectiveValues(
           'sk_clone',
           nextRun.skills.sk_clone.level,
           nextMercs,
           nextMeta
         ).effectValue;
+        const cloneRate = Math.min(MAX_ATTACKS_PER_SEC, rawCloneRate);
+        const cloneOverflowMult =
+          rawCloneRate > MAX_ATTACKS_PER_SEC ? rawCloneRate / MAX_ATTACKS_PER_SEC : 1.0;
         cloneAccRef.current += cloneRate * dt;
         const hits = Math.floor(cloneAccRef.current);
         if (hits > 0) {
           cloneAccRef.current -= hits;
-          applyHeroClicks(nextRun, nextMercs, nextMeta, hits, 'clone');
+          applyHeroClicks(
+            nextRun,
+            nextMercs,
+            nextMeta,
+            hits,
+            'clone',
+            undefined,
+            undefined,
+            cloneOverflowMult
+          );
         }
       }
 
@@ -1812,7 +2075,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
             ).effectValue
           : 0;
       const heroEstDps = latestStats.expectedHeroClick.mul(
-        latestStats.puppetRate + cloneRateNow
+        latestStats.puppetRate * latestStats.puppetOverflowMult + cloneRateNow
       );
       const poisonEstDps = getPoisonTickExpectedDamage(
         nextMercs,
@@ -1843,6 +2106,183 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         mercs: mercDpsStrings,
       };
 
+      // Late-game灵枢 Automation Cycle (runs every 0.25s)
+      autoBuyAccRef.current += dt;
+      let autoPurchased = false;
+      if (autoBuyAccRef.current >= 0.25 && !nextRun.runCompleted) {
+        autoBuyAccRef.current = 0;
+        const autoCfg = nextMeta.autoSettings;
+        const costRedNow = getCostReductionMult(nextMeta);
+
+        // Tier 3 Unlock: Auto Realm Breakthrough & Auto Puppet
+        if (nextMeta.unlockedAutoRealm) {
+          if (autoCfg.autoRealm) {
+            let realmLoop = 0;
+            while (realmLoop < 5) {
+              realmLoop++;
+              const nextInfo = getRealmInfo(nextRun.realmLevel + 1);
+              const curStones = toDecimal(nextRun.spiritStones);
+              const curClicks = toDecimal(nextRun.clickStacks);
+              if (
+                curStones.lt(nextInfo.reqStones) ||
+                (nextInfo.reqClicks > 0 && curClicks.lt(nextInfo.reqClicks))
+              ) {
+                break;
+              }
+              nextRun.spiritStones = curStones.sub(nextInfo.reqStones).toString();
+              nextRun.realmLevel += 1;
+              autoPurchased = true;
+            }
+          }
+
+          if (autoCfg.autoPuppet && nextMeta.hasUnlockedPuppet && nextRun.puppetLevel < PUPPET_MAX_LEVEL) {
+            const curStones = toDecimal(nextRun.spiritStones);
+            const pupGrowth = getEffectiveGrowthRate(PUPPET_COST_GROWTH, nextRun.tribulationId);
+            const { count, totalCost } = calculateBulkUpgrade(
+              new Decimal(PUPPET_UNLOCK_COST),
+              pupGrowth,
+              nextRun.puppetLevel + 1,
+              costRedNow,
+              'MAX',
+              curStones,
+              PUPPET_MAX_LEVEL + 1
+            );
+            if (count > 0 && curStones.gte(totalCost)) {
+              nextRun.spiritStones = curStones.sub(totalCost).toString();
+              nextRun.puppetLevel = Math.min(PUPPET_MAX_LEVEL, nextRun.puppetLevel + count);
+              autoPurchased = true;
+            }
+          }
+        }
+
+        // Tier 5 Unlock: Auto Enlightenment & Auto Skill Upgrade
+        if (nextMeta.unlockedAutoHeroUpgrades) {
+          if (autoCfg.autoEnlightenment) {
+            const curStones = toDecimal(nextRun.spiritStones);
+            const enlGrowth = getEffectiveGrowthRate(
+              ENLIGHTENMENT_COST_GROWTH,
+              nextRun.tribulationId
+            );
+            const { count, totalCost } = calculateBulkUpgrade(
+              new Decimal(ENLIGHTENMENT_BASE_COST),
+              enlGrowth,
+              nextRun.enlightenmentLevel,
+              costRedNow,
+              'MAX',
+              curStones
+            );
+            if (count > 0 && curStones.gte(totalCost)) {
+              const prevGrowth = getHeroGrowthPerClick(nextRun, nextMercs, nextMeta);
+              nextRun.spiritStones = curStones.sub(totalCost).toString();
+              nextRun.enlightenmentLevel += count;
+              const nextGrowth = getHeroGrowthPerClick(nextRun, nextMercs, nextMeta);
+              const enlightRelicLv = getRelicTotalLv(nextMeta, 'rel_r_enlight_boost');
+              if (enlightRelicLv > 0) {
+                const resGain = Decimal.max(0, nextGrowth.sub(prevGrowth)).mul(0.1);
+                nextRun.sharedHeroGrowth = toDecimal(nextRun.sharedHeroGrowth)
+                  .add(resGain)
+                  .toString();
+              }
+              autoPurchased = true;
+            }
+          }
+
+          if (autoCfg.autoSkills) {
+            for (const skCfg of SKILLS) {
+              if (nextRun.realmLevel < skCfg.unlockRealm) continue;
+              const curStones = toDecimal(nextRun.spiritStones);
+              const skGrowth = getEffectiveGrowthRate(skCfg.costGrowth, nextRun.tribulationId);
+              const curLv = nextRun.skills[skCfg.id].level;
+              const { count, totalCost } = calculateBulkUpgrade(
+                new Decimal(skCfg.baseUpgradeCost),
+                skGrowth,
+                curLv,
+                costRedNow,
+                'MAX',
+                curStones
+              );
+              if (count > 0 && curStones.gte(totalCost)) {
+                nextRun.spiritStones = curStones.sub(totalCost).toString();
+                nextRun.skills[skCfg.id] = {
+                  ...nextRun.skills[skCfg.id],
+                  level: curLv + count,
+                };
+                autoPurchased = true;
+              }
+            }
+          }
+        }
+
+        // Tier 6 Unlock: Auto Mercenary Upgrade (evaluated 5 -> 1 so late slots get priority)
+        if (nextMeta.unlockedAutoMercUpgrade && autoCfg.autoMercs) {
+          const luckLv = getRelicTotalLv(nextMeta, 'rel_e_affix_luck');
+          for (let sIdx = nextMercs.length - 1; sIdx >= 0; sIdx--) {
+            if (!autoCfg.autoMercSlots[sIdx]) continue;
+            const slot = nextMercs[sIdx];
+            if (!slot || !slot.unlocked) continue;
+
+            const arch = ARCHETYPES[slot.archetype];
+            const curStones = toDecimal(nextRun.spiritStones);
+            const mGrowth = getEffectiveGrowthRate(arch.growthRate, nextRun.tribulationId);
+            const cheapDiscount = getMercCheapDiscount(slot, nextMercs, nextMeta);
+            const { count, totalCost } = calculateBulkUpgrade(
+              new Decimal(arch.baseCost),
+              mGrowth,
+              slot.level,
+              costRedNow * (1 - cheapDiscount),
+              'MAX',
+              curStones
+            );
+            if (count <= 0 || curStones.lt(totalCost)) continue;
+
+            let bonusLevels = 0;
+            if (slot.innateAffix === 'sp_free_up') {
+              const rolls = Math.min(count, 2000);
+              for (let r = 0; r < rolls; r++) {
+                if (Math.random() < 0.35) bonusLevels++;
+              }
+            }
+
+            const newLv = slot.level + count + bonusLevels;
+            const effLv = slot.innateAffix === 'sp_double_lvl' ? newLv * 2 : newLv;
+            const prevOpen = slot.unlockedLevelSlots;
+            let nextOpen = prevOpen;
+            const nextAffixes = [...slot.levelAffixes];
+            for (let k = 0; k < LEVEL_SLOT_THRESHOLDS.length; k++) {
+              if (effLv >= LEVEL_SLOT_THRESHOLDS[k]) {
+                if (k + 1 > nextOpen) nextOpen = k + 1;
+                if (!nextAffixes[k]) {
+                  nextAffixes[k] = {
+                    id: rollRandomAffixId(),
+                    tier: rollAffixTier(luckLv),
+                  };
+                }
+              }
+            }
+
+            if (prevOpen === 0 && nextOpen >= 1) {
+              queueTutorial('tut_affix', nextMeta);
+            }
+            if (prevOpen < 10 && nextOpen === 10) {
+              nextMeta.divineCrystals = toDecimal(nextMeta.divineCrystals).add(50).toString();
+              if (!nextMeta.autoRepeatEnabled && !settingsRef.current.silentAutoClear) {
+                soundEngine.playBurst();
+                showToast(`${arch.name} 千级圆满！开启第 10 重道纹并获赠 50 神晶！`);
+              }
+            }
+
+            nextRun.spiritStones = curStones.sub(totalCost).toString();
+            nextMercs[sIdx] = {
+              ...slot,
+              level: newLv,
+              unlockedLevelSlots: nextOpen,
+              levelAffixes: nextAffixes,
+            };
+            autoPurchased = true;
+          }
+        }
+      }
+
       // Update lifetime playtime & highest DPS
       nextMeta.totalPlayTimeMs += dt * 1000;
       const totalDpsNow = mercDpsStrings.reduce(
@@ -1868,14 +2308,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       setRun(nextRun);
 
       const hasActiveMercs = nextMercs.some((m) => m.unlocked);
-      if (hasActiveMercs || shellBroke) {
+      if (hasActiveMercs || shellBroke || autoPurchased) {
         mercsRef.current = nextMercs;
         setMercs(nextMercs);
       }
 
       const stonesChanged = nextMeta.affixStones !== metaRef.current.affixStones;
       const shouldSyncMetaUi =
-        shellBroke || stonesChanged || nowMs - lastMetaUiSyncRef.current >= 1000;
+        shellBroke || stonesChanged || autoPurchased || nowMs - lastMetaUiSyncRef.current >= 1000;
 
       metaRef.current = nextMeta;
       if (shouldSyncMetaUi) {
@@ -1895,6 +2335,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     castSkillInternal,
     executeMercAttack,
     handleVictory,
+    queueTutorial,
+    showToast,
     spawnFloatingText,
     triggerArenaShake,
     triggerVibration,
@@ -1991,10 +2433,21 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       showToast('灵石不足');
       return;
     }
-    const next: RunState = {
+    const prevGrowth = getHeroGrowthPerClick(prev, mercsRef.current, metaRef.current);
+    const nextRunDraft: RunState = {
       ...prev,
       spiritStones: stones.sub(totalCost).toString(),
       enlightenmentLevel: prev.enlightenmentLevel + count,
+    };
+    const nextGrowth = getHeroGrowthPerClick(nextRunDraft, mercsRef.current, metaRef.current);
+    const enlightRelicLv = getRelicTotalLv(metaRef.current, 'rel_r_enlight_boost');
+    const gainedResonance =
+      enlightRelicLv > 0
+        ? Decimal.max(0, nextGrowth.sub(prevGrowth)).mul(0.1)
+        : new Decimal(0);
+    const next: RunState = {
+      ...nextRunDraft,
+      sharedHeroGrowth: toDecimal(prev.sharedHeroGrowth).add(gainedResonance).toString(),
     };
     runRef.current = next;
     setRun(next);
@@ -2653,6 +3106,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       setMercs(freshMercs);
       setVictorySummary(null);
       setAutoRepeatCountdown(null);
+      if (tribId !== runRef.current.tribulationId) {
+        setLastClearReport(null);
+      }
       saveToLocalStorage();
       showToast(`已切换至【${cfg.name}】`);
     },
@@ -2693,16 +3149,85 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   }, [saveToLocalStorage, showToast]);
 
   const toggleAutoRepeat = useCallback(() => {
-    setMeta((prev) => {
-      const next = { ...prev, autoRepeatEnabled: !prev.autoRepeatEnabled };
-      metaRef.current = next;
-      if (!next.autoRepeatEnabled) {
-        autoRepeatCountdownRef.current = null;
-        setAutoRepeatCountdown(null);
+    const cur = metaRef.current;
+    const nextEnabled = !cur.autoRepeatEnabled;
+    const next = { ...cur, autoRepeatEnabled: nextEnabled };
+    metaRef.current = next;
+    setMeta(next);
+    saveToLocalStorage();
+    if (!nextEnabled) {
+      autoRepeatCountdownRef.current = null;
+      setAutoRepeatCountdown(null);
+    } else if (
+      runRef.current.runCompleted &&
+      next.sssUnlockedAutoRepeat[runRef.current.tribulationId]
+    ) {
+      autoRepeatCountdownRef.current = 0.2;
+      setAutoRepeatCountdown(0.2);
+    }
+  }, [saveToLocalStorage]);
+
+  const toggleAutoSetting = useCallback(
+    (key: keyof Omit<AutoUpgradeSettings, 'autoMercSlots'>) => {
+      const m = metaRef.current;
+      if ((key === 'autoRealm' || key === 'autoPuppet') && !m.unlockedAutoRealm) {
+        showToast('首次通关【劫数三】后解锁自动破境与自动傀儡');
+        return;
       }
-      return next;
-    });
-  }, []);
+      if ((key === 'autoEnlightenment' || key === 'autoSkills') && !m.unlockedAutoHeroUpgrades) {
+        showToast('首次通关【劫数五】后解锁自动顿悟与自动强化神通');
+        return;
+      }
+      if (key === 'autoMercs' && !m.unlockedAutoMercUpgrade) {
+        showToast('首次通关【劫数六】后解锁护法自动升级');
+        return;
+      }
+      setMeta((prev) => {
+        const next: MetaState = {
+          ...prev,
+          autoSettings: {
+            ...prev.autoSettings,
+            [key]: !prev.autoSettings[key],
+          },
+        };
+        metaRef.current = next;
+        return next;
+      });
+      saveToLocalStorage();
+    },
+    [saveToLocalStorage, showToast]
+  );
+
+  const toggleAutoMercSlot = useCallback(
+    (slotIndex: number) => {
+      if (!metaRef.current.unlockedAutoMercUpgrade) {
+        showToast('首次通关【劫数六】后解锁护法自动升级');
+        return;
+      }
+      if (slotIndex < 0 || slotIndex > 4) return;
+      setMeta((prev) => {
+        const nextSlots = [...prev.autoSettings.autoMercSlots] as [
+          boolean,
+          boolean,
+          boolean,
+          boolean,
+          boolean,
+        ];
+        nextSlots[slotIndex] = !nextSlots[slotIndex];
+        const next: MetaState = {
+          ...prev,
+          autoSettings: {
+            ...prev.autoSettings,
+            autoMercSlots: nextSlots,
+          },
+        };
+        metaRef.current = next;
+        return next;
+      });
+      saveToLocalStorage();
+    },
+    [saveToLocalStorage, showToast]
+  );
 
   const setBuyMode = useCallback(
     (buyMode: BuyMode) => {
@@ -2781,6 +3306,18 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     (vibrationEnabled: boolean) => {
       setSettings((prev) => {
         const next = { ...prev, vibrationEnabled };
+        settingsRef.current = next;
+        return next;
+      });
+      saveToLocalStorage();
+    },
+    [saveToLocalStorage]
+  );
+
+  const setSilentAutoClear = useCallback(
+    (silentAutoClear: boolean) => {
+      setSettings((prev) => {
+        const next = { ...prev, silentAutoClear };
         settingsRef.current = next;
         return next;
       });
@@ -2956,6 +3493,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           typeof parsed.settings?.vibrationEnabled === 'boolean'
             ? parsed.settings.vibrationEnabled
             : true,
+        silentAutoClear:
+          typeof parsed.settings?.silentAutoClear === 'boolean'
+            ? parsed.settings.silentAutoClear
+            : true,
       };
 
       const savedAt = Date.now();
@@ -2970,6 +3511,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       setRun(nextRun);
       setSettings(nextSettings);
       setVictorySummary(null);
+      setLastClearReport(null);
       setAutoRepeatCountdown(null);
       localStorage.setItem(
         STORAGE_KEY,
@@ -3008,6 +3550,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       setMercs(freshMercs);
       setRun(freshRun);
       setVictorySummary(null);
+      setLastClearReport(null);
       setAutoRepeatCountdown(null);
       setActiveTutorial(null);
 
@@ -3024,6 +3567,38 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   const clearVictorySummary = useCallback(() => {
     autoRepeatCountdownRef.current = null;
+    setVictorySummary(null);
+    setAutoRepeatCountdown(null);
+  }, []);
+
+  const openLastClearReportModal = useCallback(() => {
+    if (lastClearReport) {
+      setVictorySummary(lastClearReport.summary);
+    }
+  }, [lastClearReport]);
+
+  const quickRestartAfterSilentClear = useCallback(() => {
+    const curRun = runRef.current;
+    const autoCasts = {
+      sk_blood: curRun.skills.sk_blood.autoCast,
+      sk_clone: curRun.skills.sk_clone.autoCast,
+      sk_thunder: curRun.skills.sk_thunder.autoCast,
+      sk_sync: curRun.skills.sk_sync.autoCast,
+    };
+    const freshRun = createInitialRunState(curRun.tribulationId, metaRef.current, autoCasts);
+    const freshMercs = resetMercsForNewRun(mercsRef.current);
+    victoryTriggeredRef.current = false;
+    autoRepeatCountdownRef.current = null;
+    runRef.current = freshRun;
+    mercsRef.current = freshMercs;
+    puppetAccRef.current = 0;
+    cloneAccRef.current = 0;
+    poisonTickAccRef.current = 0;
+    setIsHitSquashed(false);
+    setIsArenaShaking(false);
+    setHitOffset({ x: 0, y: 0 });
+    setRun(freshRun);
+    setMercs(freshMercs);
     setVictorySummary(null);
     setAutoRepeatCountdown(null);
   }, []);
@@ -3046,10 +3621,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         hitPulseId,
         shellShatterId,
         victorySummary,
+        lastClearReport,
         autoRepeatCountdown,
         toastMessage,
         activeTutorial,
         clearVictorySummary,
+        openLastClearReportModal,
+        quickRestartAfterSilentClear,
         completeIntro,
         replayIntro,
         dismissTutorial,
@@ -3071,6 +3649,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         upgradeRelic,
         switchTribulation,
         toggleAutoRepeat,
+        toggleAutoSetting,
+        toggleAutoMercSlot,
         restartRun,
         setBuyMode,
         setNumberMode,
@@ -3078,6 +3658,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         setFloatingTextMode,
         setHitVfxEnabled,
         setVibrationEnabled,
+        setSilentAutoClear,
         lastSavedAt,
         saveNow,
         exportSaveString,

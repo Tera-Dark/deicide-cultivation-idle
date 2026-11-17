@@ -39,6 +39,79 @@
   font-variant-numeric: tabular-nums;
 }
 
+@keyframes tier-sheen {
+  0% { background-position: 0% 50%; }
+  100% { background-position: 220% 50%; }
+}
+
+/* Unified Crisp Typography + Luminous Visual Effects for 凡/灵/玄/圣/仙/神 */
+.font-tier-common {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #e2e8f0;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.85);
+}
+
+.font-tier-rare {
+  font-family: var(--font-sans);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  background-image: linear-gradient(135deg, #d1fae5 0%, #34d399 52%, #10b981 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 6px rgba(16, 185, 129, 0.45));
+}
+
+.font-tier-mystic {
+  font-family: var(--font-sans);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background-image: linear-gradient(135deg, #e0f2fe 0%, #38bdf8 50%, #0ea5e9 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 8px rgba(56, 189, 248, 0.58));
+}
+
+.font-tier-saint {
+  font-family: var(--font-sans);
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  background-image: linear-gradient(135deg, #faf5ff 0%, #d8b4fe 45%, #a855f7 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  filter: drop-shadow(0 0 10px rgba(192, 132, 252, 0.68));
+}
+
+.font-tier-epic {
+  font-family: var(--font-sans);
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  background-image: linear-gradient(110deg, #fde047 0%, #f59e0b 28%, #fffbeb 50%, #fbbf24 72%, #fde047 100%);
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: tier-sheen 4.2s linear infinite;
+  filter: drop-shadow(0 0 11px rgba(251, 191, 36, 0.72));
+}
+
+.font-tier-mythic {
+  font-family: var(--font-sans);
+  font-weight: 900;
+  letter-spacing: 0.06em;
+  background-image: linear-gradient(110deg, #ffe4e6 0%, #fb7185 26%, #fde047 50%, #e11d48 74%, #fda4af 100%);
+  background-size: 220% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: tier-sheen 3.2s linear infinite;
+  filter: drop-shadow(0 0 13px rgba(244, 63, 94, 0.85)) drop-shadow(0 1px 2px rgba(0, 0, 0, 0.95));
+}
+
 .pb-safe {
   padding-bottom: env(safe-area-inset-bottom, 0px);
 }

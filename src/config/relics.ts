@@ -1,4 +1,5 @@
-import type { MetaState, RelicConfig, RelicId, RelicTier } from '../types/game';
+import type { MetaState, RelicConfig, RelicId, RelicTier, TribulationId } from '../types/game';
+import { TRIBULATION_MAP } from './bosses';
 
 export interface RelicTierMeta {
   label: string;
@@ -8,6 +9,7 @@ export interface RelicTierMeta {
   baseWeight: number;
   overflowBaseCrystals: number;
   colorClass: string;
+  fontClass: string;
   borderClass: string;
   badgeBgClass: string;
   dropHint: string;
@@ -15,76 +17,82 @@ export interface RelicTierMeta {
 
 export const RELIC_TIER_META: Record<RelicTier, RelicTierMeta> = {
   common: {
-    label: '凡阶',
+    label: '凡',
     shortLabel: '凡',
-    colorName: '白色',
+    colorName: '素白',
     order: 1,
     baseWeight: 40,
     overflowBaseCrystals: 12,
     colorClass: 'text-[#e2e8f0]',
+    fontClass: 'font-tier-common',
     borderClass: 'border-white/25',
     badgeBgClass: 'bg-[#1a1f32]',
-    dropHint: '劫1~2通关掉落',
+    dropHint: '劫1~10掉落',
   },
   rare: {
-    label: '灵阶',
+    label: '灵',
     shortLabel: '灵',
-    colorName: '绿色',
+    colorName: '翠绿',
     order: 2,
     baseWeight: 28,
     overflowBaseCrystals: 75,
     colorClass: 'text-[#34d399]',
+    fontClass: 'font-tier-rare',
     borderClass: 'border-[#10b981]/50',
     badgeBgClass: 'bg-[#064e3b]/28',
-    dropHint: '劫3~4通关掉落',
+    dropHint: '劫2~10掉落',
   },
   mystic: {
-    label: '玄阶',
+    label: '玄',
     shortLabel: '玄',
-    colorClass: 'text-[#38bdf8]',
-    colorName: '蓝色',
+    colorName: '幽蓝',
     order: 3,
     baseWeight: 18,
     overflowBaseCrystals: 500,
+    colorClass: 'text-[#38bdf8]',
+    fontClass: 'font-tier-mystic',
     borderClass: 'border-[#0284c7]/55',
     badgeBgClass: 'bg-[#0c4a6e]/32',
-    dropHint: '劫5~6通关掉落',
+    dropHint: '劫3~10掉落',
   },
   saint: {
-    label: '圣阶',
+    label: '圣',
     shortLabel: '圣',
-    colorName: '紫色',
+    colorName: '玄紫',
     order: 4,
     baseWeight: 10,
     overflowBaseCrystals: 2500,
     colorClass: 'text-[#c084fc]',
+    fontClass: 'font-tier-saint',
     borderClass: 'border-[#9333ea]/60',
     badgeBgClass: 'bg-[#4c1d95]/28',
-    dropHint: '劫7~8通关掉落',
+    dropHint: '劫5~10掉落',
   },
   epic: {
-    label: '仙阶',
+    label: '仙',
     shortLabel: '仙',
-    colorName: '金色',
+    colorName: '鎏金',
     order: 5,
     baseWeight: 4,
     overflowBaseCrystals: 18000,
     colorClass: 'text-[#fbbf24]',
+    fontClass: 'font-tier-epic',
     borderClass: 'border-[#f59e0b]/70',
     badgeBgClass: 'bg-[#78350f]/28',
-    dropHint: '劫9通关掉落',
+    dropHint: '劫7~10掉落',
   },
   mythic: {
-    label: '神阶·古神',
+    label: '神',
     shortLabel: '神',
-    colorName: '红色',
+    colorName: '猩红',
     order: 6,
     baseWeight: 0,
     overflowBaseCrystals: 100000,
     colorClass: 'text-[#fb7185]',
+    fontClass: 'font-tier-mythic',
     borderClass: 'border-[#f43f5e]/65',
     badgeBgClass: 'bg-[#881337]/30',
-    dropHint: '终焉劫通关掉落',
+    dropHint: '仅劫十 1%',
   },
 };
 
@@ -98,7 +106,7 @@ export const RELIC_TIER_ORDER: RelicTier[] = [
 ];
 
 export const RELICS: RelicConfig[] = [
-  // 6 凡阶 (白色) - 劫数 1~2 专属掉落
+  // ==================== 一、凡 (8件) ====================
   {
     id: 'rel_c_click_flat',
     tier: 'common',
@@ -117,7 +125,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 10,
     costGrowth: 1.24,
-    description: '主角点击最终伤害 +(25% × 总等级)。',
+    description: '主角点击最终伤害 +(12% × 总等级)。',
   },
   {
     id: 'rel_c_stone_gain',
@@ -127,7 +135,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 10,
     costGrowth: 1.24,
-    description: '全队造成伤害转化为灵石的基础比例 +(15% × 总等级)。',
+    description: '全队造成伤害转化为灵石的基础比例 +(10% × 总等级)。',
   },
   {
     id: 'rel_c_cost_down',
@@ -137,7 +145,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: 20,
     baseCost: 15,
     costGrowth: 1.3,
-    description: '局内升级灵石成本降低 1.5% × 总等级（特限劫印≤20，合计最高减耗 90%）。',
+    description: '局内升级灵石成本降低 1.0% × 总等级（特限劫印≤20，合计最高减耗 60%）。',
   },
   {
     id: 'rel_c_mana_cap',
@@ -159,8 +167,28 @@ export const RELICS: RelicConfig[] = [
     costGrowth: 1.3,
     description: '主角每次手动点击恢复的道力额外 +(0.05 × 总等级)。',
   },
+  {
+    id: 'rel_c_merc_atk',
+    tier: 'common',
+    name: '磨剑石碑',
+    maxLevel: 100,
+    maxDropLevel: null,
+    baseCost: 12,
+    costGrowth: 1.24,
+    description: '全队 1~5 号位护法基础伤害直接提升 +(10% × 总等级)。',
+  },
+  {
+    id: 'rel_c_mana_regen',
+    tier: 'common',
+    name: '吐纳玉简',
+    maxLevel: 40,
+    maxDropLevel: null,
+    baseCost: 14,
+    costGrowth: 1.26,
+    description: '主角每秒自然恢复的道力额外 +(0.25 × 总等级)。',
+  },
 
-  // 6 灵阶 (绿色) - 劫数 3~4 解锁掉落
+  // ==================== 二、灵 (9件) ====================
   {
     id: 'rel_c_puppet_spd',
     tier: 'rare',
@@ -169,7 +197,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 25,
     costGrowth: 1.28,
-    description: '机关傀儡基础点击频率额外 +(0.2 × 总等级) 次/秒。',
+    description: '机关傀儡基础点击频率额外 +(0.2 × 总等级) 次/秒（超 25次/秒 转攻击力）。',
   },
   {
     id: 'rel_c_start_gold',
@@ -179,7 +207,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 30,
     costGrowth: 1.32,
-    description: '开局初始灵石：500 × (3 ^ 神晶级) × (1 + 0.5 × 劫印级)。',
+    description: '开局初始灵石：500 × (1.65 ^ 神晶级) × (1 + 0.35 × 劫印级)。',
   },
   {
     id: 'rel_r_sword_dmg',
@@ -189,7 +217,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 28,
     costGrowth: 1.26,
-    description: '1号位【青冥剑侍】最终伤害 +(40% × 总等级)。',
+    description: '1号位【青冥剑侍】最终伤害 +(20% × 总等级)。',
   },
   {
     id: 'rel_r_tentacle',
@@ -199,7 +227,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 28,
     costGrowth: 1.26,
-    description: '2号位【深渊触母】直伤与每秒毒伤 +(40% × 总等级)。',
+    description: '2号位【深渊触母】直伤与每秒毒伤 +(20% × 总等级)。',
   },
   {
     id: 'rel_r_cannon_dmg',
@@ -209,7 +237,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 32,
     costGrowth: 1.26,
-    description: '3号位【雷火机神】最终伤害 +(55% × 总等级)。',
+    description: '3号位【雷火机神】最终伤害 +(25% × 总等级)。',
   },
   {
     id: 'rel_r_thunder',
@@ -221,8 +249,38 @@ export const RELICS: RelicConfig[] = [
     costGrowth: 1.28,
     description: '【天罚神雷】爆发伤害额外 ×(1 + 0.15 × 总等级)。',
   },
+  {
+    id: 'rel_r_merc_spd',
+    tier: 'rare',
+    name: '疾风羽靴',
+    maxLevel: 50,
+    maxDropLevel: null,
+    baseCost: 34,
+    costGrowth: 1.28,
+    description: '全队 1~5 号位护法基础攻速额外 +(4% × 总等级)（超出 25次/秒(0.04s) 极限等比例转攻击力）。',
+  },
+  {
+    id: 'rel_r_merc_crit',
+    tier: 'rare',
+    name: '破绽罗盘',
+    maxLevel: 40,
+    maxDropLevel: 30,
+    baseCost: 38,
+    costGrowth: 1.3,
+    description: '全队护法基础暴击率 +(1.5% × 总等级)，超百溢暴率按 1:2 转为爆伤（特限劫印≤30）。',
+  },
+  {
+    id: 'rel_r_enlight_boost',
+    tier: 'rare',
+    name: '悟道蒲团',
+    maxLevel: 60,
+    maxDropLevel: null,
+    baseCost: 32,
+    costGrowth: 1.26,
+    description: '主角每升 1 级【顿悟】，主角基础点击成长额外 +(2% × 总等级) 并向护法反哺 10% 共鸣攻击。',
+  },
 
-  // 5 玄阶 (蓝色) - 劫数 5~6 解锁掉落
+  // ==================== 三、玄 (8件) ====================
   {
     id: 'rel_r_array_buff',
     tier: 'mystic',
@@ -261,7 +319,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 110,
     costGrowth: 1.28,
-    description: '主角与全队护法（含毒伤暴击）基础暴击伤害 +(15% × 总等级)。',
+    description: '主角与全队护法（含毒伤暴击）基础暴击伤害 +(10% × 总等级)。',
   },
   {
     id: 'rel_r_boss_hp',
@@ -271,10 +329,40 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: 30,
     baseCost: 180,
     costGrowth: 1.38,
-    description: '所有难度下 BOSS 总血量开局削减 1.5% × 总等级（特限劫印≤30，合计至多 -90%）。',
+    description: '所有难度下 BOSS 总血量开局削减 1.0% × 总等级（特限劫印≤30，合计至多削减 60%）。',
+  },
+  {
+    id: 'rel_y_mana_blade',
+    tier: 'mystic',
+    name: '化气为剑',
+    maxLevel: 60,
+    maxDropLevel: null,
+    baseCost: 140,
+    costGrowth: 1.3,
+    description: '【道力蓄锋】当前每保留 10 点道力，主角与全队最终伤害额外 +(0.6% × 总等级)。',
+  },
+  {
+    id: 'rel_y_shell_burst',
+    tier: 'mystic',
+    name: '碎壳余震',
+    maxLevel: 40,
+    maxDropLevel: null,
+    baseCost: 160,
+    costGrowth: 1.34,
+    description: '每击破 1 重古神躯壳，立刻对下重躯壳倾泻等同当前全队 (1.0 × 总等级) 秒 DPS 的破障真伤！',
+  },
+  {
+    id: 'rel_y_drop_luck',
+    tier: 'mystic',
+    name: '天机寻宝盘',
+    maxLevel: 25,
+    maxDropLevel: 25,
+    baseCost: 220,
+    costGrowth: 1.4,
+    description: '劫数通关掉落遗物时，更高阶遗物的权重提升 +(12% × 总等级)（特限劫印≤25）。',
   },
 
-  // 4 圣阶 (紫色) - 劫数 7~8 解锁掉落
+  // ==================== 四、圣 (7件 · 含神晶增幅) ====================
   {
     id: 'rel_r_essence',
     tier: 'saint',
@@ -315,8 +403,38 @@ export const RELICS: RelicConfig[] = [
     costGrowth: 2.0,
     description: '允许 2 号位毒伤暴击（30%+4%×总级暴率上限100%，200%+40%×总级爆伤）。',
   },
+  {
+    id: 'rel_s_crystal_bless',
+    tier: 'saint',
+    name: '圣灵聚晶塔',
+    maxLevel: 80,
+    maxDropLevel: null,
+    baseCost: 750,
+    costGrowth: 1.32,
+    description: '通关结算与满印溢转获得的【神晶】数量额外 +(10% × 总等级)。',
+  },
+  {
+    id: 'rel_s_execute_dmg',
+    tier: 'saint',
+    name: '残月断魂镰',
+    maxLevel: 60,
+    maxDropLevel: null,
+    baseCost: 900,
+    costGrowth: 1.32,
+    description: '敌方当前躯壳血量 <50% 时全队终伤 +(8% × 总等级)；第 8~10 重躯壳常驻生效一半 (+4% × 总等级)。',
+  },
+  {
+    id: 'rel_s_stone_surge',
+    tier: 'saint',
+    name: '点石成金印',
+    maxLevel: 30,
+    maxDropLevel: 20,
+    baseCost: 1000,
+    costGrowth: 1.38,
+    description: '灵石每多 1 个数量级全队终伤 +(1.5% × 总等级)，且破壳返还 1%×总级（上限25%）灵石（特限劫印≤20）。',
+  },
 
-  // 4 仙阶 (金色) - 劫数 9 解锁掉落
+  // ==================== 五、仙 (7件 · 含高阶神晶与掉宝增幅) ====================
   {
     id: 'rel_e_auto_start',
     tier: 'epic',
@@ -325,7 +443,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: 10,
     baseCost: 3500,
     costGrowth: 1.9,
-    description: '开局赠 5×总等级 级傀儡（上限100）与 1000×(2^神晶级)×(1+0.5×劫印级) 修为（劫印≤10）。',
+    description: '开局赠 3×总等级 级傀儡（上限50）与 800×(1.5^神晶级)×(1+0.35×劫印级) 修为（劫印≤10）。',
   },
   {
     id: 'rel_e_boss_skip',
@@ -343,9 +461,9 @@ export const RELICS: RelicConfig[] = [
     name: '弑神道果',
     maxLevel: null,
     maxDropLevel: null,
-    baseCost: 2000,
-    costGrowth: 1.26,
-    description: '全队最终总伤害额外 ×(1.12 ^ 神晶级) × (1.02 ^ 劫印级)。',
+    baseCost: 3000,
+    costGrowth: 1.32,
+    description: '全队最终总伤害额外 ×(1.07 ^ 神晶级) × (1.015 ^ 劫印级)。',
   },
   {
     id: 'rel_e_inf_crystal',
@@ -355,10 +473,40 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 2500,
     costGrowth: 1.32,
-    description: '通关结算获得的【神晶】数量额外 +(18% × 总等级)。',
+    description: '通关结算与满印溢转获得的【神晶】数量额外 +(15% × 总等级)。',
+  },
+  {
+    id: 'rel_e_rarity_crown',
+    tier: 'epic',
+    name: '造化仙冕',
+    maxLevel: 20,
+    maxDropLevel: 15,
+    baseCost: 4500,
+    costGrowth: 1.65,
+    description: '高阶遗物掉落权重再 +(25% × 总等级)，且有 min(40%, 1.5%×总级) 概率额外多掉 1 件遗物！',
+  },
+  {
+    id: 'rel_e_click_storm',
+    tier: 'epic',
+    name: '万道归宗剑印',
+    maxLevel: 40,
+    maxDropLevel: null,
+    baseCost: 3200,
+    costGrowth: 1.36,
+    description: '主角每累计攻击 10 次，立即引动全体已上阵护法各发动 1 次无冷却 +(10% × 总等级) 倍率合击！',
+  },
+  {
+    id: 'rel_e_void_mana',
+    tier: 'epic',
+    name: '混沌道海',
+    maxLevel: 40,
+    maxDropLevel: null,
+    baseCost: 3000,
+    costGrowth: 1.35,
+    description: '道力上限 +(15×总级)、回蓝 +(0.8×总级)/s；本局每放 1 次神通按基础蓝耗叠终伤 +(0.025%×总级/点，上限+600%)。',
   },
 
-  // 5 神阶·古神 (红色) - 终焉劫(劫10)唯一掉落
+  // ==================== 六、神 (6件 · 劫十 1% 终极追求) ====================
   {
     id: 'rel_m_first_affix',
     tier: 'mythic',
@@ -387,7 +535,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 20000,
     costGrowth: 2.4,
-    description: '每解锁 1 位本命护法，全队最终总伤害额外 ×(1 + 0.20 × 总等级)。',
+    description: '每解锁 1 位本命护法，全队最终总伤害额外 ×(1 + 0.12 × 总等级)。',
   },
   {
     id: 'rel_m_click_echo',
@@ -397,7 +545,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: 10,
     baseCost: 18000,
     costGrowth: 2.3,
-    description: '主角点击修为 10% × 总等级 永久同步至佣兵基础面板（特限劫印≤10，上限200%）。',
+    description: '主角点击修为 10% × 总等级 永久同步至护法基础面板（特限劫印≤10，上限200%）。',
   },
   {
     id: 'rel_m_final_mult',
@@ -407,7 +555,17 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 12000,
     costGrowth: 1.4,
-    description: '真神乘区：全队最终伤害复利 ×(1.5 ^ 神晶级) × (1.06 ^ 劫印级)。',
+    description: '真神乘区：全队最终伤害复利 ×(1.25 ^ 神晶级) × (1.035 ^ 劫印级)。',
+  },
+  {
+    id: 'rel_m_god_crystal',
+    tier: 'mythic',
+    name: '古神铸晶炉',
+    maxLevel: null,
+    maxDropLevel: null,
+    baseCost: 16000,
+    costGrowth: 1.38,
+    description: '【神·神晶核心】神晶获取额外 +(25% × 总等级)，且全队最终总伤害额外 ×(1 + 0.15 × 总等级)。',
   },
 ];
 
@@ -433,6 +591,72 @@ export function getRelicLevelsBreakdown(meta: MetaState, relicId: RelicId) {
   };
 }
 
+export function getDropRarityLuckScore(meta: MetaState): number {
+  const panLv =
+    (meta.relicLevels.rel_y_drop_luck ?? 0) + (meta.relicDropLevels?.rel_y_drop_luck ?? 0);
+  const crownLv =
+    (meta.relicLevels.rel_e_rarity_crown ?? 0) + (meta.relicDropLevels?.rel_e_rarity_crown ?? 0);
+  return 0.12 * panLv + 0.25 * crownLv;
+}
+
+export interface TribulationDropTierOdd {
+  tier: RelicTier;
+  meta: RelicTierMeta;
+  basePct: number;
+  effectivePct: number;
+  effectiveWeight: number;
+}
+
+/**
+ * Computes effective rarity probabilities for a Tribulation's independent drop table,
+ * factoring in rarity-luck relics (天机寻宝盘 + 造化仙冕).
+ */
+export function getTribulationEffectiveDropOdds(
+  tribId: TribulationId,
+  meta: MetaState
+): TribulationDropTierOdd[] {
+  const trib = TRIBULATION_MAP[tribId];
+  if (!trib) return [];
+  const entries = RELIC_TIER_ORDER.map((tier) => ({
+    tier,
+    baseW: trib.relicDropWeights[tier] ?? 0,
+  })).filter((e) => e.baseW > 0);
+
+  if (entries.length === 0) return [];
+  const baseSum = entries.reduce((s, e) => s + e.baseW, 0);
+  const minOrder = Math.min(...entries.map((e) => RELIC_TIER_META[e.tier].order));
+  const luckScore = getDropRarityLuckScore(meta);
+
+  const weighted = entries.map((e) => {
+    const step = RELIC_TIER_META[e.tier].order - minOrder;
+    const effectiveWeight = e.baseW * (1 + luckScore * step * 0.65);
+    return {
+      tier: e.tier,
+      meta: RELIC_TIER_META[e.tier],
+      basePct: (e.baseW / baseSum) * 100,
+      effectiveWeight,
+    };
+  });
+
+  const effSum = weighted.reduce((s, e) => s + e.effectiveWeight, 0);
+  return weighted.map((e) => ({
+    ...e,
+    effectivePct: (e.effectiveWeight / effSum) * 100,
+  }));
+}
+
+export function rollTribulationRelicTier(tribId: TribulationId, meta: MetaState): RelicTier {
+  const odds = getTribulationEffectiveDropOdds(tribId, meta);
+  if (odds.length === 0) return 'common';
+  const totalW = odds.reduce((s, o) => s + o.effectiveWeight, 0);
+  let r = Math.random() * totalW;
+  for (const o of odds) {
+    r -= o.effectiveWeight;
+    if (r <= 0) return o.tier;
+  }
+  return odds[odds.length - 1].tier;
+}
+
 export interface RelicDropRuleInfo {
   tier: RelicTier;
   meta: RelicTierMeta;
@@ -445,12 +669,12 @@ export interface RelicDropRuleInfo {
 
 export function getRelicDropOverview(meta: MetaState): RelicDropRuleInfo[] {
   const specs: Record<RelicTier, { tribRangeLabel: string; unlockOrder: number }> = {
-    common: { tribRangeLabel: '劫数一 ~ 劫数二', unlockOrder: 1 },
-    rare: { tribRangeLabel: '劫数三 ~ 劫数四', unlockOrder: 3 },
-    mystic: { tribRangeLabel: '劫数五 ~ 劫数六', unlockOrder: 5 },
-    saint: { tribRangeLabel: '劫数七 ~ 劫数八', unlockOrder: 7 },
-    epic: { tribRangeLabel: '劫数九', unlockOrder: 9 },
-    mythic: { tribRangeLabel: '终焉劫 (劫十)', unlockOrder: 10 },
+    common: { tribRangeLabel: '劫一 ~ 劫十', unlockOrder: 1 },
+    rare: { tribRangeLabel: '劫二 ~ 劫十', unlockOrder: 2 },
+    mystic: { tribRangeLabel: '劫三 ~ 劫十', unlockOrder: 3 },
+    saint: { tribRangeLabel: '劫五 ~ 劫十', unlockOrder: 5 },
+    epic: { tribRangeLabel: '劫七 ~ 劫十', unlockOrder: 7 },
+    mythic: { tribRangeLabel: '仅限劫十 (1%)', unlockOrder: 10 },
   };
 
   return RELIC_TIER_ORDER.map((tier) => {
