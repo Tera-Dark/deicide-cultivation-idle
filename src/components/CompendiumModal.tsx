@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 import {
   AFFIX_LIST,
-  AFFIX_TIER_META,
   INNATE_AFFIX_LIST,
   getAffixTierRates,
 } from '../config/affixes';
@@ -376,7 +375,7 @@ export function CompendiumModal({ open, onClose }: { open: boolean; onClose: () 
                 </div>
                 {luckLv > 0 && (
                   <p className="text-xs text-[#c084fc]">
-                    当前已受【七彩神石 Lv.{luckLv}】加成（极品/仙品权重 +{luckLv * 6}%）
+                    当前已受【七彩神石 Lv.{luckLv}】加成（极品/仙品权重 +{luckLv * 8}%）
                   </p>
                 )}
               </div>
@@ -785,23 +784,27 @@ export function CompendiumModal({ open, onClose }: { open: boolean; onClose: () 
                 </div>
               </div>
 
-              {/* 3 Endgame Synergies */}
+              {/* 4 Endgame Synergies */}
               <div className="space-y-2">
                 <h3 className="font-display text-sm font-black tracking-wider text-[#fbbf24] px-0.5 inline-flex items-center gap-1.5">
                   <BookOpen className="w-4 h-4" />
-                  <span>终局三大核心联动流派</span>
+                  <span>终局四大核心联动流派</span>
                 </h3>
                 <div className="rounded-xl bg-[#101322] border border-[#06b6d4]/35 p-3 text-xs text-[#cbd5e1] leading-relaxed">
                   <div className="font-bold text-[#e0f2fe] text-[13px] mb-1">1. 高频毒爆流</div>
-                  <RichLoreText text="给【青冥剑侍】洗【万毒催熟】+【残影连击】/★【万剑归宗】，高频多段斩击引爆【深渊触母】指数腐蚀毒。" />
+                  <RichLoreText text="给【青冥剑侍】洗【万毒催熟】+【残影连击】/★【万剑归宗】，高频斩击引爆【深渊触母】腐蚀毒（推荐 ★【万毒之源】上限 3500 层）。" />
                 </div>
                 <div className="rounded-xl bg-[#101322] border border-[#f59e0b]/35 p-3 text-xs text-[#cbd5e1] leading-relaxed">
                   <div className="font-bold text-[#fef08a] text-[13px] mb-1">2. 无限核弹流</div>
-                  <RichLoreText text="剑侍与主角攻击每 15 次缩减【雷火机神】1 秒冷却，搭配【雷火装填】与★【歼星连射】实现核弹加特林。" />
+                  <RichLoreText text="剑侍与主角攻击每 15 次缩减【雷火机神】1 秒冷却，搭配【雷火装填】【重火协同】与★【歼星连射】实现核弹加特林。" />
                 </div>
                 <div className="rounded-xl bg-[#101322] border border-[#f43f5e]/35 p-3 text-xs text-[#cbd5e1] leading-relaxed">
                   <div className="font-bold text-[#fecdd3] text-[13px] mb-1">3. 千级登神流</div>
                   <RichLoreText text="搭配【缩资减耗】与★【天道酬勤】速冲 Lv.1000，触发【混沌古神嗣】全队总有效级指数倍增与★【千级共鸣】。" />
+                </div>
+                <div className="rounded-xl bg-[#101322] border border-[#a855f7]/35 p-3 text-xs text-[#cbd5e1] leading-relaxed">
+                  <div className="font-bold text-[#e9d5ff] text-[13px] mb-1">4. 道海叩击流</div>
+                  <RichLoreText text="主洗【强击】【道心共鸣】【借力打力】，依靠古神道躯突破（全伤 ×10）与【悟道蒲团】【岁月史书】反哺全队。" />
                 </div>
               </div>
             </div>
@@ -860,7 +863,7 @@ export function CompendiumModal({ open, onClose }: { open: boolean; onClose: () 
                     </div>
                   ))}
                   <div className="text-xs text-[#94a3b8] pt-1 leading-relaxed">
-                    化神之后可无限突破【古神道躯·N重】，每次灵石需求 ×200，主角全伤永久额外 ×4。
+                    化神之后可无限突破【古神道躯·N重】，每次灵石需求 ×200，主角全伤永久额外 ×10。
                   </div>
                 </div>
               </div>
@@ -920,7 +923,7 @@ export function CompendiumModal({ open, onClose }: { open: boolean; onClose: () 
                 <ul className="space-y-1.5 text-xs text-[#cbd5e1] leading-relaxed">
                   <li>
                     · <span className="text-[#fde68a] font-semibold">灵石阶段衰减</span>：第 1~3
-                    重躯壳 100% 转化，4~6 重 60%，7~8 重 30%，9~10 重仅 10%。
+                    重躯壳 100% 转化，4~6 重 75%，7~8 重 55%，9~10 重 35%。
                   </li>
                   <li>
                     · <span className="text-[#6ee7b7] font-semibold">心魔瓶颈与傀儡</span>：累计修为达单次成长

@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import Decimal from 'break_infinity.js';
-import { BookOpen, Lock, SlidersHorizontal } from 'lucide-react';
+import { BookOpen, ChevronDown, ChevronUp, Layers, Lock, SlidersHorizontal } from 'lucide-react';
 import {
   AFFIXES,
   AFFIX_TIER_META,
@@ -18,6 +19,7 @@ import {
   getMercCheapDiscount,
   getMercenaryComputedStats,
   getRelicTotalLv,
+  getTeamCombatDpsBreakdown,
   isSlot5Active,
 } from '../core/damageCalc';
 import { MERC_TYPOGRAPHY } from '../config/highlights';
@@ -42,6 +44,7 @@ export function TabMercenaries({
     toggleAutoSetting,
     toggleAutoMercSlot,
   } = useGameStore();
+  const [showBuildAnalysis, setShowBuildAnalysis] = useState(false);
 
   const stones = toDecimal(run.spiritStones);
   const crystals = toDecimal(meta.divineCrystals);
@@ -50,6 +53,52 @@ export function TabMercenaries({
   const costRed = getCostReductionMult(meta);
   const firstAffixRelicLv = getRelicTotalLv(meta, 'rel_m_first_affix');
   const s5 = isSlot5Active(mercs);
+
+  // Live team DPS attribution (single source of truth matching BossArena HUD) & active synergy detection
+  const teamBreakdown = getTeamCombatDpsBreakdown(run, mercs, meta);
+  const heroDps = teamBreakdown.heroDps;
+  const poisonDps = teamBreakdown.poisonTotalDps;
+  const totalTeamDps = teamBreakdown.totalDps;
+  const slotStats = mercs.map((_, i) =>
+    getMercenaryComputedStats(
+      i,
+      mercs,
+      run,
+      meta,
+      heroStats.heroBasePower,
+      heroStats.rawHeroClick,
+      globalMult
+    )
+  );
+  const pctOf = (v: Decimal) =>
+    totalTeamDps.gt(0) ? Math.min(100, v.div(totalTeamDps).toNumber() * 100) : 0;
+
+  const detectedSynergies: { label: string; color: string }[] = [];
+  if (run.realmLevel >= 4 || toDecimal(run.sharedHeroGrowth).gt(0)) {
+    detectedSynergies.push({
+      label: `道海叩击 (${pctOf(heroDps).toFixed(0)}%)`,
+      color: 'text-[#67e8f9]',
+    });
+  }
+  if (mercs[1]?.unlocked && (run.poisonStacks > 0 || slotStats.some((s) => s.poisonPopChance > 0))) {
+    detectedSynergies.push({
+      label: `高频毒爆 (${pctOf(poisonDps).toFixed(0)}%)`,
+      color: 'text-[#34d399]',
+    });
+  }
+  if (mercs[2]?.unlocked && (mercs[2].innateAffix === 'sp_cannon_gat' || slotStats.some((s) => s.cdReduceCanSec > 0))) {
+    detectedSynergies.push({
+      label: `无限核弹 (${pctOf(slotStats[2].dpsEstimate).toFixed(0)}%)`,
+      color: 'text-[#fbbf24]',
+    });
+  }
+  if (s5) {
+    const gte500 = mercs.filter((m) => m.unlocked && getEffectiveLevel(m) >= 500).length;
+    detectedSynergies.push({
+      label: `五核共鸣 (${gte500}/5 ≥500级)`,
+      color: 'text-[#fb7185]',
+    });
+  }
 
   return (
     <div className="space-y-2.5">
@@ -88,6 +137,73 @@ export function TabMercenaries({
         <span className="font-mono-num text-xs font-bold text-[#fbbf24] shrink-0">
           保底气运 {meta.rerollPity}/10
         </span>
+      </div>
+
+      {/* Collapsible Build & DPS Attribution Strip */}
+      <div className="bg-[#131624] border border-[#2e3552] rounded-xl px-3.5 py-2">
+        <button
+          type="button"
+          onClick={() => setShowBuildAnalysis((v) => !v)}
+          className="w-full min-h-[38px] flex items-center justify-between gap-2 text-xs text-[#cbd5e1] hover:text-white cursor-pointer"
+        >
+          <span className="inline-flex items-center gap-2 min-w-0">
+            <Layers className="w-4 h-4 text-[#38bdf8] shrink-0" />
+            <span className="font-bold text-[#f4f1ea] shrink-0">构筑流派与伤害占比</span>
+            <span className="font-mono-num text-[11px] text-[#94a3b8] truncate">
+              总秒伤 {formatNumber(totalTeamDps, settings.numberMode, true)}/s
+            </span>
+          </span>
+          <span className="inline-flex items-center gap-1 text-[#7dd3fc] font-semibold shrink-0 whitespace-nowrap">
+            <span>{showBuildAnalysis ? '收起' : '展开'}</span>
+            {showBuildAnalysis ? (
+              <ChevronUp className="w-4 h-4" />
+            ) : (
+              <ChevronDown className="w-4 h-4" />
+            )}
+          </span>
+        </button>
+
+        {showBuildAnalysis && (
+          <div className="mt-2.5 pt-2.5 border-t border-white/8 space-y-2.5 text-xs">
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 font-mono-num">
+              {[
+                { name: '主角叩击', val: heroDps, color: 'text-[#67e8f9]' },
+                { name: '青冥剑侍', val: slotStats[0].dpsEstimate, color: 'text-[#38bdf8]' },
+                { name: '腐蚀毒伤', val: poisonDps, color: 'text-[#34d399]' },
+                { name: '雷火机神', val: slotStats[2].dpsEstimate, color: 'text-[#fbbf24]' },
+                {
+                  name: '触+阵直伤',
+                  val: slotStats[1].dpsEstimate.add(slotStats[3].dpsEstimate),
+                  color: 'text-[#c084fc]',
+                },
+                { name: '古神嗣', val: slotStats[4].dpsEstimate, color: 'text-[#fb7185]' },
+              ].map((row) => (
+                <div
+                  key={row.name}
+                  className="rounded-lg bg-[#101322] border border-white/8 px-2 py-1.5"
+                >
+                  <div className="text-[11px] text-[#94a3b8] truncate">{row.name}</div>
+                  <div className={`font-bold ${row.color}`}>{pctOf(row.val).toFixed(1)}%</div>
+                </div>
+              ))}
+            </div>
+
+            {detectedSynergies.length > 0 && (
+              <div className="flex items-center gap-x-3 gap-y-1 flex-wrap text-[11.5px]">
+                <span className="text-[#94a3b8] font-semibold">已识别流派联动：</span>
+                {detectedSynergies.map((sy) => (
+                  <span key={sy.label} className={`font-mono-num font-bold ${sy.color}`}>
+                    · {sy.label}
+                  </span>
+                ))}
+              </div>
+            )}
+
+            <p className="text-[11px] text-[#94a3b8] leading-relaxed">
+              提示：【百炼成仙】整百复利上限已平衡为单护法合计 +120%/百级，请搭配直伤、连击、毒爆、核弹充能与借力打力等多维道纹形成完整流派！
+            </p>
+          </div>
+        )}
       </div>
 
       {/* 5 Fixed Mercenary Cards */}

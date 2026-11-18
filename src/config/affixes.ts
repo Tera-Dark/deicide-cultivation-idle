@@ -252,9 +252,9 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     id: 'af_t2_century',
     name: '百炼成仙',
     tierGroup: '中等',
-    baseValue: 25,
+    baseValue: 12,
     unitKind: 'pct',
-    description: '每达整百有效级（100..1000），自身伤害复利 ×(1+{val}%)。',
+    description: '每达整百有效级（100..1000），自身伤害复利 ×(1+{val}%)（单护法整百合计上限 +120%）。',
   },
 
   // ===== 上等 · 跨佣兵点名联动词缀 (14) =====
@@ -360,7 +360,7 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     tierGroup: '上等',
     baseValue: 0.5,
     unitKind: 'pct',
-    description: 'BOSS 每有 10 层腐蚀毒，本佣兵直伤 +{val}%（上限 5000%）。',
+    description: 'BOSS 每有 10 层腐蚀毒，本佣兵直伤 +{val}%（上限 1200%）。',
   },
   af_t3_lone: {
     id: 'af_t3_lone',
@@ -378,7 +378,7 @@ export const INNATE_AFFIXES: Record<InnateAffixId, InnateAffixConfig> = {
   sp_double_lvl: {
     id: 'sp_double_lvl',
     name: '★【法天象地】',
-    description: '计算所有伤害、槽位节点与跨佣兵联动时，有效等级直接视为当前等级 ×2！',
+    description: '计算槽位里程碑（每槽 ×2）、光环与跨护法联动时有效等级直接 ×2（基础底盘仍按实购等级稳步成长）！',
   },
   sp_affix_boost: {
     id: 'sp_affix_boost',
@@ -403,7 +403,7 @@ export const INNATE_AFFIXES: Record<InnateAffixId, InnateAffixConfig> = {
   sp_poison_god: {
     id: 'sp_poison_god',
     name: '★【万毒之源】',
-    description: '每次叠加腐蚀毒时改为使 BOSS 当前毒层数额外增加 5%（指数叠毒）！',
+    description: '每次叠加腐蚀毒时改为使 BOSS 当前毒层数额外增加 2%（上限 3500 层，持久战指数毒潮）！',
     recommendedFor: '深渊触母推荐',
   },
   sp_cannon_gat: {
@@ -438,7 +438,7 @@ export const INNATE_AFFIX_LIST: InnateAffixConfig[] = Object.values(INNATE_AFFIX
  * Three-way multiplier for level affix slots (0..9):
  * 1. Slot 5 unlocked -> *1.5
  * 2. Merc innate sp_affix_boost -> *2.0
- * 3. Relic rel_m_first_affix (slots 0..3 / Lv.10~Lv.100) -> *(1 + 0.25 * L)
+ * 3. Relic rel_m_first_affix (slots 0..3 / Lv.10~Lv.100) -> *(1 + 0.12 * L)
  */
 export function getAffixEffectiveValue(
   inst: AffixInstance,
@@ -453,7 +453,7 @@ export function getAffixEffectiveValue(
   const tierMult = tierMeta.mult;
   const slot5Boost = isSlot5Unlocked ? 1.5 : 1.0;
   const innateBoost = hasInnateBoost ? 2.0 : 1.0;
-  const relicSlotBoost = slotIdx <= 3 ? 1 + 0.25 * firstAffixRelicLv : 1.0;
+  const relicSlotBoost = slotIdx <= 3 ? 1 + 0.12 * firstAffixRelicLv : 1.0;
   return cfg.baseValue * tierMult * slot5Boost * innateBoost * relicSlotBoost;
 }
 
@@ -512,7 +512,7 @@ export function rollAffixTier(affixLuckRelicLv: number, forceHighTier = false): 
   if (forceHighTier) {
     return Math.random() < 0.8 ? 'purple' : 'gold';
   }
-  const luckMult = 1 + 0.06 * affixLuckRelicLv;
+  const luckMult = 1 + 0.08 * affixLuckRelicLv;
   const weights: [AffixTier, number][] = [
     ['white', AFFIX_TIER_META.white.weight],
     ['green', AFFIX_TIER_META.green.weight],
@@ -537,7 +537,7 @@ export function getAffixTierRates(affixLuckRelicLv: number): {
   basePct: number;
   effectivePct: number;
 }[] {
-  const luckMult = 1 + 0.06 * affixLuckRelicLv;
+  const luckMult = 1 + 0.08 * affixLuckRelicLv;
   const baseWeights: Record<AffixTier, number> = {
     white: AFFIX_TIER_META.white.weight,
     green: AFFIX_TIER_META.green.weight,

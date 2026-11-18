@@ -124,29 +124,34 @@ export function TabHero() {
         </button>
 
         {autoOpen && (
-          <div className="px-3 pb-2.5 pt-1 border-t border-white/6 grid grid-cols-2 sm:grid-cols-4 gap-2">
-            {autoItems.map((item) => {
-              const active = item.unlocked && autoCfg[item.key];
-              return (
-                <button
-                  key={item.key}
-                  type="button"
-                  onClick={() => toggleAutoSetting(item.key)}
-                  className={`min-h-[40px] px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer flex items-center justify-between gap-1 ${
-                    !item.unlocked
-                      ? 'bg-[#101322] border-[#2e3552]/70 text-[#64748b]'
-                      : active
-                        ? 'bg-[#10b981]/22 border-[#34d399]/60 text-[#ecfdf5]'
-                        : 'bg-[#1a1f32] border-[#384166] text-[#cbd5e1] hover:text-white'
-                  }`}
-                >
-                  <span className="truncate">{item.label}</span>
-                  <span className="font-mono-num text-[11px] shrink-0">
-                    {!item.unlocked ? item.reqHint : active ? '开' : '关'}
-                  </span>
-                </button>
-              );
-            })}
+          <div className="px-3 pb-2.5 pt-1 border-t border-white/6 space-y-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              {autoItems.map((item) => {
+                const active = item.unlocked && autoCfg[item.key];
+                return (
+                  <button
+                    key={item.key}
+                    type="button"
+                    onClick={() => toggleAutoSetting(item.key)}
+                    className={`min-h-[40px] px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer flex items-center justify-between gap-1 ${
+                      !item.unlocked
+                        ? 'bg-[#101322] border-[#2e3552]/70 text-[#64748b]'
+                        : active
+                          ? 'bg-[#10b981]/22 border-[#34d399]/60 text-[#ecfdf5]'
+                          : 'bg-[#1a1f32] border-[#384166] text-[#cbd5e1] hover:text-white'
+                    }`}
+                  >
+                    <span className="truncate">{item.label}</span>
+                    <span className="font-mono-num text-[11px] shrink-0">
+                      {!item.unlocked ? item.reqHint : active ? '开' : '关'}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[11px] text-[#94a3b8] leading-snug">
+              灵石优先供给护法升级；开启护法自动后，顿悟/强技仅消耗 5% 余钱，离线闭关同样自动修行。
+            </p>
           </div>
         )}
       </div>
@@ -256,7 +261,7 @@ export function TabHero() {
           <p className="text-xs text-[#a3b1cc] leading-snug">
             {showPuppet
               ? '自动叩击古神（享 25% 顿悟修为成长 · 上限25次/秒，超限等比例转攻击）'
-              : '首次击破第 1 重躯壳（500 血）后开放'}
+              : '首次击破第 1 重躯壳（25 血）后开放'}
           </p>
         </div>
 

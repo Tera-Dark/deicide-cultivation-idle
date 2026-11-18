@@ -11,7 +11,7 @@
 
 1. **初始状态**：
    * 主角初始基础攻击力 `baseAtk = 10`。
-   * 重开初始化 `accumulatedAtk`：若拥有【仙】阶遗物【逆时沙漏 (`TotalLv(rel_e_auto_start) > 0`)】，开局设为 `800 * (1.5 ^ 神晶级) * (1 + 0.35 * 劫印级)`；否则为 `0`。
+   * 重开初始化 `accumulatedAtk`：若拥有【仙】阶遗物【逆时沙漏 (`TotalLv(rel_e_auto_start) > 0`)】，开局设为 `500 * (1.28 ^ 神晶级) * (1 + 0.25 * 劫印级)`；否则为 `0`。
 2. **动态累积与连携规则**：
    * 每次发生有效点击时，按以下公式计算修为成长 `actualGain`：
      ```ts
@@ -20,16 +20,16 @@
      // 2. 心魔瓶颈软上限：若当前 accumulatedAtk 已超过 growthPerClick * 500，叠攻效率衰减为 20%
      const capPenalty = accumulatedAtk.gte(growthPerClick.times(500)) ? 0.20 : 1.0;
      // 3. 1技能【燃血叩击】爆发乘数（受【神】阶遗物 万法道胎 rel_m_auto_skill 放大）
-     const relicSkillBoost = 1 + 0.2 * TotalLv(rel_m_auto_skill);
+     const relicSkillBoost = 1 + 0.15 * TotalLv(rel_m_auto_skill);
      const skill1Mult = isSkill1Active ? (2.0 + 0.5 * Skill1Level) * relicSkillBoost : 1.0;
 
      const actualGain = growthPerClick.times(sourceFactor).times(capPenalty).times(skill1Mult);
      accumulatedAtk = accumulatedAtk.plus(actualGain);
 
-     // 4. 【神】阶遗物 岁月史书 (rel_m_click_echo)：同步将 actualGain * min(2.0, 0.1 * TotalLv) 累加至佣兵 SharedHeroGrowth
-     if (TotalLv(rel_m_click_echo) > 0) SharedHeroGrowth = SharedHeroGrowth.plus(actualGain.times(Math.min(2.0, 0.1 * TotalLv(rel_m_click_echo))));
+     // 4. 【神】阶遗物 岁月史书 (rel_m_click_echo)：同步将 actualGain * min(1.2, 0.06 * TotalLv) 累加至佣兵 SharedHeroGrowth
+     if (TotalLv(rel_m_click_echo) > 0) SharedHeroGrowth = SharedHeroGrowth.plus(actualGain.times(Math.min(1.2, 0.06 * TotalLv(rel_m_click_echo))));
      ```
-   * **【仙】阶遗物 万道归宗剑印 (`rel_e_click_storm`)**：主角每累计发生 `10` 次点击，立即引动全体已上阵护法各发动 `1` 次无冷却 `+ (10% * TotalLv)` 倍率合击！
+   * **【仙】阶遗物 万道归宗剑印 (`rel_e_click_storm`)**：主角每累计发生 `10` 次点击，立即引动全体已上阵护法各发动 `1` 次无冷却 `+ (4% * TotalLv)` 倍率合击！
 
 ---
 
@@ -37,14 +37,14 @@
 
 ### 模块 A：【顿悟】（提升每次点击增加的攻击力 `growthPerClick`）
 * **初始等级**：1 级（每击 `+1` 攻）。
-* **升级价格公式**：`Cost(L) = 25 * (1.42 ^ (L - 1)) * max(0.4, 1 - 0.01 * TotalLv(rel_c_cost_down))`
+* **升级价格公式**：`Cost(L) = 25 * (1.42 ^ (L - 1)) * max(0.55, 1 - 0.0075 * TotalLv(rel_c_cost_down))`
 * **每级效果公式（阶梯多项式 × 悟道蒲团）**：
   ```ts
-  growthPerClick(L) = (1 + (L - 1) * (1 + Math.floor(L / 10) * 1.5) + (2 * TotalLv(rel_c_click_flat)))
+  growthPerClick(L) = (1 + (L - 1) * (1 + Math.floor(L / 10) * 1.5) + (1.5 * TotalLv(rel_c_click_flat)))
                     * (1 + Sum_AllActive(af_t2_h_grow))
-                    * (1 + Math.max(0, L - 1) * 0.02 * TotalLv(rel_r_enlight_boost));
+                    * (1 + Math.max(0, L - 1) * 0.015 * TotalLv(rel_r_enlight_boost));
   ```
-  *若持有【灵】阶遗物 悟道蒲团 (`rel_r_enlight_boost`)，每次升级【顿悟】还会将增幅量的 `10%` 同步反哺给全体护法的 `sharedHeroGrowth`。*
+  *若持有【灵】阶遗物 悟道蒲团 (`rel_r_enlight_boost`)，每次升级【顿悟】还会将增幅量的 `(4% + 3% × 总等级)` 同步反哺给全体护法的 `sharedHeroGrowth`。*
 
 ### 模块 B：【肉身破境】（阶段性质变 —— 必须同时满足点击次数并扣除灵石！）
 
@@ -55,14 +55,14 @@
 | 2阶 | **煞气金丹** | **消耗 `25,000` 灵石**| 250 次 | `×8` | 解锁第3神通：【天罚神雷】（破壳核弹） |
 | 3阶 | **不灭元婴** | **消耗 `1.50e6` (150万)**| 1,000 次 | `×28` | 解锁第4神通：【弑神共鸣】（全队暴走） |
 | 4阶 | **法则化神** | **消耗 `2.00e8` (2亿)** | 3,000 次 | `×120` | 道力上限额外 `+50`，自然恢复 `+1.5/秒` |
-| 5阶~N阶 | **古神道躯·N重**| **消耗 `2e8 * (200 ^ (N-4))`**| 无需点击限制 | 每阶额外 `×4` | 中后期主角伤害质变池 |
+| 5阶~N阶 | **古神道躯·N重**| **消耗 `2e8 * (200 ^ (N-4))`**| 无需点击限制 | 每阶额外 `×10` | 中后期主角道海叩击流核心放大器 |
 
 ### 模块 C：【机关傀儡】（自动点击器）
-* **解锁条件**：首次击破第 1 重躯壳后永久显示购买项；若拥有【逆时沙漏 (`TotalLv > 0`)】，开局直接免费赠送 `min(50, 3 * TotalLv)` 级（手动上限 50 级）。
-* **升级价格公式（当前等级 `L >= 0`）**：`Cost(L) = 60 * (1.28 ^ L) * max(0.4, 1 - 0.01 * TotalLv(rel_c_cost_down))`
+* **解锁条件**：首次击破第 1 重躯壳后永久显示购买项；若拥有【逆时沙漏 (`TotalLv > 0`)】，开局直接免费赠送 `min(50, 2 * TotalLv)` 级（手动上限 50 级）。
+* **升级价格公式（当前等级 `L >= 0`）**：`Cost(L) = 60 * (1.28 ^ L) * max(0.55, 1 - 0.0075 * TotalLv(rel_c_cost_down))`
 * **攻速与 `25次/秒` 溢出转攻公式**：
   ```ts
-  rawPuppetRate = (1.5 + (L - 1) * 0.35) + (0.2 * TotalLv(rel_c_puppet_spd)) + Sum_AllActive(af_t2_puppet);
+  rawPuppetRate = (1.5 + (L - 1) * 0.35) + (0.15 * TotalLv(rel_c_puppet_spd)) + Sum_AllActive(af_t2_puppet);
   // 在劫数三受“凝滞虚空”限制，上限锁为 8 次/秒
   puppetRate = Math.min(25, rawPuppetRate);
   puppetOverflowMult = rawPuppetRate > 25 ? rawPuppetRate / 25 : 1.0;
@@ -73,20 +73,20 @@
 ## 三、 道力（Mana）与 4 大主动神通系统
 
 ### 1. 道力上限与恢复完整公式
-* **容量上限 (`MaxMana`)**：`100 + (4 * TotalLv(rel_c_mana_cap)) + (15 * TotalLv(rel_e_void_mana)) + (Realm >= 4 ? 50 : 0)`。**每局开局默认拥有 `40` 点道力**。
-* **自然恢复速率 (`ManaRegenPerSec`)**：`[ 1.0 + (Realm >= 4 ? 1.5 : 0) + Sum_AllActive(af_t1_mana_r) + 0.25 * TotalLv(rel_c_mana_regen) + 0.8 * TotalLv(rel_e_void_mana) ] * (isTier7 ? 0.5 : 1.0)`。
+* **容量上限 (`MaxMana`)**：`100 + (4 * TotalLv(rel_c_mana_cap)) + (10 * TotalLv(rel_e_void_mana)) + (Realm >= 4 ? 50 : 0)`。**每局开局默认拥有 `40` 点道力**。
+* **自然恢复速率 (`ManaRegenPerSec`)**：`[ 1.0 + (Realm >= 4 ? 1.5 : 0) + Sum_AllActive(af_t1_mana_r) + 0.25 * TotalLv(rel_c_mana_regen) + 0.5 * TotalLv(rel_e_void_mana) ] * (isTier7 ? 0.5 : 1.0)`。
 * **手动点击回蓝 (`ManaPerManualClick`)**：`[ 0.8 + (0.05 * TotalLv(rel_c_mana_click)) ] * (isTier7 ? 0.5 : 1.0)`。
-* **【化气为剑】与【混沌道海】机制**：持有【玄】阶遗物`rel_y_mana_blade`时每保留 10 点当前道力全队终伤 `+(0.6% × L)`；持有【仙】阶遗物`rel_e_void_mana`时每次释放主动神通累计 `manaSpentThisRun += cfg.manaCost`，叠加全队终伤 `+(0.025% × L / 点)`（上限 `+600%`）。
+* **【化气为剑】与【混沌道海】机制**：持有【玄】阶遗物`rel_y_mana_blade`时每保留 10 点当前道力战术终伤池 `+(0.2% × L)`；持有【仙】阶遗物`rel_e_void_mana`时每次释放主动神通累计 `manaSpentThisRun += cfg.manaCost`，在战术终伤池加算 `+(0.01% × L / 点)`（上限 `+250%`）。
 
 ### 2. 四大主动神通配置表
-升级价格公式：`BaseCost * (1.65 ^ (SLvl - 1)) * max(0.4, 1 - 0.01 * TotalLv(rel_c_cost_down))`；冷却缩减：`CD * max(0.2, 1 - 0.016 * TotalLv(rel_r_skill_cd))`；持续延长：`Dur + (0.5 * TotalLv(rel_r_skill_dur))`；【神】阶遗物【万法道胎 (`rel_m_auto_skill`)】使全神通无蓝耗自动释放，且效果倍率额外 `× (1 + 0.2 * TotalLv(rel_m_auto_skill))`。**（若持续时间因遗物延长而超过冷却时间，重复释放仅刷新当前持续时间，效果不叠加。）**
+升级价格公式：`BaseCost * (1.65 ^ (SLvl - 1)) * max(0.55, 1 - 0.0075 * TotalLv(rel_c_cost_down))`；冷却缩减：`CD * max(0.25, 1 - 0.012 * TotalLv(rel_r_skill_cd))`；持续延长：`Dur + (0.3 * TotalLv(rel_r_skill_dur))`；【神】阶遗物【万法道胎 (`rel_m_auto_skill`)】使全神通无蓝耗自动释放，且效果倍率额外 `× (1 + 0.15 * TotalLv(rel_m_auto_skill))`。**（若持续时间因遗物延长而超过冷却时间，重复释放仅刷新当前持续时间，效果不叠加。）**
 
 | 技能ID | 神通名称 | 解锁境界 | 消耗道力 | 原始持续 / 原始CD | 初始升级价 (`BaseCost`) | 技能效果与等级成长公式 (`SLvl` 为技能等级) |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| `sk_blood` | **① 燃血叩击** | 初始自带 | `20` 点 | 持续 **8秒** / CD 25秒 | `100` 灵石 | **叠攻爆发**：激活期间，主角每次点击获得的攻击力成长值 **`× (2.0 + 0.5 * SLvl) * (1 + 0.2 * TotalLv(rel_m_auto_skill))`**。 |
-| `sk_clone` | **② 万法残影** | 1阶筑基 | `35` 点 | 持续 **8秒** / CD 35秒 | `1,200` 灵石 | **高频连打**：召唤残影，每秒名义发动 **`(5 + 1 * SLvl) * (1 + 0.2 * TotalLv(rel_m_auto_skill))` 次** 主角点击（实际至多 25 次/秒，超出 1:1 转为单次伤害，享受 100% 顿悟叠攻）。 |
-| `sk_thunder`| **③ 天罚神雷** | 2阶金丹 | `50` 点 | 瞬发 / CD 25秒 | `30,000` 灵石 | **破盾核弹**：立即造成 **`RawHeroClick × (150 + 50 * SLvl) × (1 + 0.15 * TotalLv(rel_r_thunder)) × (1 + Sum_AllActive(af_t1_skill_d)) × (1 + 0.2 * TotalLv(rel_m_auto_skill))`** 伤害！ |
-| `sk_sync` | **④ 弑神共鸣** | 3阶元婴 | `75` 点 | 持续 10秒 / CD 50秒 | `1.00e6` 灵石 | **全队暴走**：激活期间，所有已上阵佣兵攻速 **`×1.5`**，且佣兵每次攻击额外附带主角 **`RawHeroClick × (0.3 * SLvl) × (1 + 0.2 * TotalLv(rel_m_auto_skill))`** 协同伤害！ |
+| `sk_blood` | **① 燃血叩击** | 初始自带 | `20` 点 | 持续 **8秒** / CD 25秒 | `100` 灵石 | **叠攻爆发**：激活期间，主角每次点击获得的攻击力成长值 **`× (2.0 + 0.5 * SLvl) * (1 + 0.15 * TotalLv(rel_m_auto_skill))`**。 |
+| `sk_clone` | **② 万法残影** | 1阶筑基 | `35` 点 | 持续 **8秒** / CD 35秒 | `1,200` 灵石 | **高频连打**：召唤残影，每秒名义发动 **`(5 + 1 * SLvl) * (1 + 0.15 * TotalLv(rel_m_auto_skill))` 次** 主角点击（实际至多 25 次/秒，超出 1:1 转为单次伤害，享受 100% 顿悟叠攻）。 |
+| `sk_thunder`| **③ 天罚神雷** | 2阶金丹 | `50` 点 | 瞬发 / CD 25秒 | `30,000` 灵石 | **破盾核弹**：立即造成 **`RawHeroClick × (150 + 50 * SLvl) × (1 + 0.05 * TotalLv(rel_r_thunder)) × (1 + Sum_AllActive(af_t1_skill_d)) × (1 + 0.15 * TotalLv(rel_m_auto_skill))`** 伤害！ |
+| `sk_sync` | **④ 弑神共鸣** | 3阶元婴 | `75` 点 | 持续 10秒 / CD 50秒 | `1.00e6` 灵石 | **全队暴走**：激活期间，所有已上阵佣兵攻速 **`×1.5`**，且佣兵每次攻击额外附带主角 **`RawHeroClick × (0.3 * SLvl) × (1 + 0.15 * TotalLv(rel_m_auto_skill))`** 协同伤害！ |
 
 ---
 
@@ -102,4 +102,6 @@
 | **首通劫数四** | 主角【四大神通自动连续释放】 | 战区神通栏快捷开关 |
 | **首通劫数五** | 主角【自动顿悟】+【自动强化神通】 | 主角面板顶部快捷开关 |
 | **首通劫数六** | 【五护法自动升级】（支持 1~5 号位单槽开关） | 护法面板总控 + 各护法卡片独立按钮 |
-| **任意劫数 SSS** | 本劫 **`0.25s` 无感自动连刷** | 战区右上快捷按钮 / 劫数弹窗 |
+| **任意劫数 SSS** | 本劫 **`0.25s` 无感自动连刷** | 战区右上快捷按钮 / 劫数弹窗（离线下享 55% 效率、上限 12h 扫荡） |
+
+> **智能分配策略**：当开启【护法自动升级】时，自动顿悟与自动强技单轮各自仅动用不超过当前灵石 `20%` 的预算（保留大部分灵石给护法），且五人护法执行**低价高性价比优先**轮询升级（1~5 号位均衡成长，高费神嗣不会吸干低费光环位资源）。

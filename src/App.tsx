@@ -7,12 +7,14 @@ import {
   BuildGuideModal,
   IntroModal,
   MercForgeModal,
+  OfflineReportModal,
   RestartModal,
   SettingsModal,
   TribulationsModal,
   UnlockTutorialModal,
   VictoryModal,
 } from './components/Modals';
+import { OfflineIndicator } from './components/OfflineIndicator';
 import { TabHero } from './components/TabHero';
 import { TabMercenaries } from './components/TabMercenaries';
 import { TabRelics } from './components/TabRelics';
@@ -307,6 +309,7 @@ function GameShell() {
       <UnlockTutorialModal />
       <BuildGuideModal open={guideOpen} onClose={() => setGuideOpen(false)} />
       <VictoryModal />
+      <OfflineReportModal />
       <TribulationsModal open={tribulationsOpen} onClose={() => setTribulationsOpen(false)} />
       <CompendiumModal open={compendiumOpen} onClose={() => setCompendiumOpen(false)} />
       <MercForgeModal
@@ -323,6 +326,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <GameProvider>
+        <OfflineIndicator />
         <GameShell />
       </GameProvider>
     </ErrorBoundary>

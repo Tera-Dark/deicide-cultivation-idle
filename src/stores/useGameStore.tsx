@@ -40,7 +40,6 @@ import {
   evaluateSpeedrunRank,
   getCostReductionMult,
   getEffectiveGrowthRate,
-  getEffectiveLevel,
   getGlobalMult,
   getHeroGrowthPerClick,
   getHeroStats,
@@ -54,6 +53,7 @@ import {
   getRelicTotalLv,
   getSkillEffectiveValues,
   getSpiritStoneMultiplier,
+  getTeamCombatDpsBreakdown,
   getTribulationConfig,
   isSlot5Active,
   sumAllActiveAffixRatio,
@@ -73,6 +73,7 @@ import type {
   MercenarySlotState,
   MetaState,
   NumberDisplayMode,
+  OfflineSummary,
   PhaseBreakBanner,
   RelicId,
   RunState,
@@ -216,9 +217,9 @@ export function createInitialRunState(
   const startGoldDropLv = meta.relicDropLevels?.rel_c_start_gold ?? 0;
   const startStones =
     startGoldCrystalLv + startGoldDropLv > 0
-      ? new Decimal(500)
-          .mul(Decimal.pow(1.65, startGoldCrystalLv))
-          .mul(1 + 0.35 * startGoldDropLv)
+      ? new Decimal(400)
+          .mul(Decimal.pow(1.35, startGoldCrystalLv))
+          .mul(1 + 0.25 * startGoldDropLv)
       : new Decimal(0);
 
   const hourglassCrystalLv = meta.relicLevels.rel_e_auto_start ?? 0;
@@ -226,12 +227,12 @@ export function createInitialRunState(
   const hourglassTotalLv = hourglassCrystalLv + hourglassDropLv;
   const startAccumulated =
     hourglassTotalLv > 0
-      ? new Decimal(800)
-          .mul(Decimal.pow(1.5, hourglassCrystalLv))
-          .mul(1 + 0.35 * hourglassDropLv)
+      ? new Decimal(500)
+          .mul(Decimal.pow(1.28, hourglassCrystalLv))
+          .mul(1 + 0.25 * hourglassDropLv)
       : new Decimal(0);
   const freePuppetLv =
-    hourglassTotalLv > 0 ? Math.min(PUPPET_MAX_LEVEL, 3 * hourglassTotalLv) : 0;
+    hourglassTotalLv > 0 ? Math.min(PUPPET_MAX_LEVEL, 2 * hourglassTotalLv) : 0;
 
   return {
     tribulationId,
@@ -488,11 +489,720 @@ function sanitizeMercsState(raw: unknown, defaultMercs: MercenarySlotState[]): M
   });
 }
 
+const OFFLINE_MIN_MS = 60 * 1000;
+const OFFLINE_MAX_MS = 12 * 3600 * 1000;
+const OFFLINE_EFFICIENCY = 0.55;
+const OFFLINE_MAX_SWEEPS = 120;
+
+interface AutoUpgradeCycleCallbacks {
+  onUnlockAffixTut?: () => void;
+  onThousandMilestone?: (mercName: string) => void;
+}
+
+/**
+ * Shared 灵枢 automation pass used by both 20Hz live ticks and Mode B offline simulation.
+ * Priority: Tier 3 Realm/Puppet -> Tier 6 Smart Mercs -> Tier 5 Enlightenment/Skills (5% surplus budget if Merc auto is active).
+ */
+function applyAutoUpgradesCycle(
+  nextRun: RunState,
+  nextMercs: MercenarySlotState[],
+  nextMeta: MetaState,
+  callbacks?: AutoUpgradeCycleCallbacks
+): boolean {
+  if (nextRun.runCompleted) return false;
+  let autoPurchased = false;
+  const autoCfg = nextMeta.autoSettings;
+  const costRedNow = getCostReductionMult(nextMeta);
+
+  // 1. Tier 3 Unlock: Auto Realm Breakthrough & Auto Puppet
+  if (nextMeta.unlockedAutoRealm) {
+    if (autoCfg.autoRealm) {
+      let realmLoop = 0;
+      while (realmLoop < 5) {
+        realmLoop++;
+        const nextInfo = getRealmInfo(nextRun.realmLevel + 1);
+        const curStones = toDecimal(nextRun.spiritStones);
+        const curClicks = toDecimal(nextRun.clickStacks);
+        if (
+          curStones.lt(nextInfo.reqStones) ||
+          (nextInfo.reqClicks > 0 && curClicks.lt(nextInfo.reqClicks))
+        ) {
+          break;
+        }
+        nextRun.spiritStones = curStones.sub(nextInfo.reqStones).toString();
+        nextRun.realmLevel += 1;
+        autoPurchased = true;
+      }
+    }
+
+    if (
+      autoCfg.autoPuppet &&
+      nextMeta.hasUnlockedPuppet &&
+      nextRun.puppetLevel < PUPPET_MAX_LEVEL
+    ) {
+      const curStones = toDecimal(nextRun.spiritStones);
+      const pupGrowth = getEffectiveGrowthRate(PUPPET_COST_GROWTH, nextRun.tribulationId);
+      const { count, totalCost } = calculateBulkUpgrade(
+        new Decimal(PUPPET_UNLOCK_COST),
+        pupGrowth,
+        nextRun.puppetLevel + 1,
+        costRedNow,
+        'MAX',
+        curStones,
+        PUPPET_MAX_LEVEL + 1
+      );
+      if (count > 0 && curStones.gte(totalCost)) {
+        nextRun.spiritStones = curStones.sub(totalCost).toString();
+        nextRun.puppetLevel = Math.min(PUPPET_MAX_LEVEL, nextRun.puppetLevel + count);
+        autoPurchased = true;
+      }
+    }
+  }
+
+  // 2. Tier 6 Unlock: Smart Cheapest-First Auto Mercenary Upgrade (runs BEFORE Enlightenment/Skills!)
+  const hasActiveAutoMerc =
+    nextMeta.unlockedAutoMercUpgrade &&
+    autoCfg.autoMercs &&
+    nextMercs.some((m, idx) => autoCfg.autoMercSlots[idx] && m?.unlocked);
+
+  if (hasActiveAutoMerc) {
+    const luckLv = getRelicTotalLv(nextMeta, 'rel_e_affix_luck');
+    for (let round = 0; round < 32; round++) {
+      const curStones = toDecimal(nextRun.spiritStones);
+      let bestIdx = -1;
+      let bestSingleCost = new Decimal(Infinity);
+
+      for (let sIdx = 0; sIdx < nextMercs.length; sIdx++) {
+        if (!autoCfg.autoMercSlots[sIdx]) continue;
+        const slot = nextMercs[sIdx];
+        if (!slot || !slot.unlocked) continue;
+        const arch = ARCHETYPES[slot.archetype];
+        const mGrowth = getEffectiveGrowthRate(arch.growthRate, nextRun.tribulationId);
+        const cheapDiscount = getMercCheapDiscount(slot, nextMercs, nextMeta);
+        const { count, totalCost } = calculateBulkUpgrade(
+          new Decimal(arch.baseCost),
+          mGrowth,
+          slot.level,
+          costRedNow * (1 - cheapDiscount),
+          1,
+          curStones
+        );
+        if (count > 0 && totalCost.lt(bestSingleCost)) {
+          bestSingleCost = totalCost;
+          bestIdx = sIdx;
+        }
+      }
+
+      if (bestIdx === -1) break;
+
+      const slot = nextMercs[bestIdx];
+      const arch = ARCHETYPES[slot.archetype];
+      const mGrowth = getEffectiveGrowthRate(arch.growthRate, nextRun.tribulationId);
+      const cheapDiscount = getMercCheapDiscount(slot, nextMercs, nextMeta);
+      const mult = costRedNow * (1 - cheapDiscount);
+
+      const bulk100 = calculateBulkUpgrade(
+        new Decimal(arch.baseCost),
+        mGrowth,
+        slot.level,
+        mult,
+        100,
+        curStones.mul(0.35)
+      );
+      const bulk10 =
+        bulk100.count >= 10
+          ? bulk100
+          : calculateBulkUpgrade(
+              new Decimal(arch.baseCost),
+              mGrowth,
+              slot.level,
+              mult,
+              10,
+              curStones.mul(0.5)
+            );
+      const pick =
+        bulk10.count > 0
+          ? bulk10
+          : calculateBulkUpgrade(
+              new Decimal(arch.baseCost),
+              mGrowth,
+              slot.level,
+              mult,
+              1,
+              curStones
+            );
+
+      if (pick.count <= 0 || curStones.lt(pick.totalCost)) break;
+
+      let bonusLevels = 0;
+      if (slot.innateAffix === 'sp_free_up') {
+        const rolls = Math.min(pick.count, 500);
+        for (let r = 0; r < rolls; r++) {
+          if (Math.random() < 0.35) bonusLevels++;
+        }
+      }
+
+      const newLv = slot.level + pick.count + bonusLevels;
+      const effLv = slot.innateAffix === 'sp_double_lvl' ? newLv * 2 : newLv;
+      const prevOpen = slot.unlockedLevelSlots;
+      let nextOpen = prevOpen;
+      const nextAffixes = [...slot.levelAffixes];
+      for (let k = 0; k < LEVEL_SLOT_THRESHOLDS.length; k++) {
+        if (effLv >= LEVEL_SLOT_THRESHOLDS[k]) {
+          if (k + 1 > nextOpen) nextOpen = k + 1;
+          if (!nextAffixes[k]) {
+            nextAffixes[k] = {
+              id: rollRandomAffixId(),
+              tier: rollAffixTier(luckLv),
+            };
+          }
+        }
+      }
+
+      if (prevOpen === 0 && nextOpen >= 1) {
+        callbacks?.onUnlockAffixTut?.();
+      }
+      if (prevOpen < 10 && nextOpen === 10) {
+        nextMeta.divineCrystals = toDecimal(nextMeta.divineCrystals).add(50).toString();
+        callbacks?.onThousandMilestone?.(arch.name);
+      }
+
+      nextRun.spiritStones = curStones.sub(pick.totalCost).toString();
+      nextMercs[bestIdx] = {
+        ...slot,
+        level: newLv,
+        unlockedLevelSlots: nextOpen,
+        levelAffixes: nextAffixes,
+      };
+      autoPurchased = true;
+    }
+  }
+
+  // 3. Tier 5 Unlock: Auto Enlightenment & Auto Skill Upgrade (capped to 5% surplus budget when Auto-Mercs is active)
+  if (nextMeta.unlockedAutoHeroUpgrades) {
+    if (autoCfg.autoEnlightenment) {
+      const curStones = toDecimal(nextRun.spiritStones);
+      const enlBudget = hasActiveAutoMerc ? curStones.mul(0.05) : curStones;
+      const enlGrowth = getEffectiveGrowthRate(
+        ENLIGHTENMENT_COST_GROWTH,
+        nextRun.tribulationId
+      );
+      const { count, totalCost } = calculateBulkUpgrade(
+        new Decimal(ENLIGHTENMENT_BASE_COST),
+        enlGrowth,
+        nextRun.enlightenmentLevel,
+        costRedNow,
+        'MAX',
+        enlBudget
+      );
+      if (count > 0 && curStones.gte(totalCost)) {
+        const prevGrowth = getHeroGrowthPerClick(nextRun, nextMercs, nextMeta);
+        nextRun.spiritStones = curStones.sub(totalCost).toString();
+        nextRun.enlightenmentLevel += count;
+        const nextGrowth = getHeroGrowthPerClick(nextRun, nextMercs, nextMeta);
+        const enlightRelicLv = getRelicTotalLv(nextMeta, 'rel_r_enlight_boost');
+        if (enlightRelicLv > 0) {
+          const resGain = Decimal.max(0, nextGrowth.sub(prevGrowth)).mul(
+            0.04 + 0.03 * enlightRelicLv
+          );
+          nextRun.sharedHeroGrowth = toDecimal(nextRun.sharedHeroGrowth)
+            .add(resGain)
+            .toString();
+        }
+        autoPurchased = true;
+      }
+    }
+
+    if (autoCfg.autoSkills) {
+      for (const skCfg of SKILLS) {
+        if (nextRun.realmLevel < skCfg.unlockRealm) continue;
+        const curStones = toDecimal(nextRun.spiritStones);
+        const skBudget = hasActiveAutoMerc ? curStones.mul(0.05) : curStones;
+        const skGrowth = getEffectiveGrowthRate(skCfg.costGrowth, nextRun.tribulationId);
+        const curLv = nextRun.skills[skCfg.id].level;
+        const { count, totalCost } = calculateBulkUpgrade(
+          new Decimal(skCfg.baseUpgradeCost),
+          skGrowth,
+          curLv,
+          costRedNow,
+          'MAX',
+          skBudget
+        );
+        if (count > 0 && curStones.gte(totalCost)) {
+          nextRun.spiritStones = curStones.sub(totalCost).toString();
+          nextRun.skills[skCfg.id] = {
+            ...nextRun.skills[skCfg.id],
+            level: curLv + count,
+          };
+          autoPurchased = true;
+        }
+      }
+    }
+  }
+
+  return autoPurchased;
+}
+
+function settleOfflineProgress(
+  savedAt: unknown,
+  run: RunState,
+  mercs: MercenarySlotState[],
+  meta: MetaState
+): {
+  run: RunState;
+  mercs: MercenarySlotState[];
+  meta: MetaState;
+  offlineSummary: OfflineSummary | null;
+  pendingTutorials: TutorialNodeId[];
+} {
+  if (typeof savedAt !== 'number' || !Number.isFinite(savedAt) || savedAt <= 0) {
+    return { run, mercs, meta, offlineSummary: null, pendingTutorials: [] };
+  }
+  const nowMs = Date.now();
+  const elapsedOfflineMs = nowMs - savedAt;
+  if (elapsedOfflineMs < OFFLINE_MIN_MS) {
+    return { run, mercs, meta, offlineSummary: null, pendingTutorials: [] };
+  }
+
+  const cappedMs = Math.min(elapsedOfflineMs, OFFLINE_MAX_MS);
+  const trib = getTribulationConfig(run.tribulationId);
+  const nextMeta: MetaState = {
+    ...meta,
+    shownTutorials: { ...meta.shownTutorials },
+    relicLevels: { ...meta.relicLevels },
+    relicDropLevels: { ...(meta.relicDropLevels ?? {}) },
+    clearedTribulations: { ...meta.clearedTribulations },
+    clearCounts: { ...meta.clearCounts },
+    bestClearTimesMs: { ...meta.bestClearTimesMs },
+    sssUnlockedAutoRepeat: { ...meta.sssUnlockedAutoRepeat },
+    totalPlayTimeMs: meta.totalPlayTimeMs + cappedMs,
+  };
+  const pendingTutorials: TutorialNodeId[] = [];
+  const pushPendingTut = (id: TutorialNodeId) => {
+    if (!nextMeta.shownTutorials[id]) {
+      nextMeta.shownTutorials[id] = true;
+      if (!pendingTutorials.includes(id)) {
+        pendingTutorials.push(id);
+      }
+    }
+  };
+
+  const dropAgg: Partial<Record<RelicId, { levelsAdded: number; wasNew: boolean }>> = {};
+  const rollRelicDrop = () => {
+    const rolledTier = rollTribulationRelicTier(trib.id, nextMeta);
+    const tierRelics = RELICS.filter((r) => r.tier === rolledTier);
+    const unowned = tierRelics.filter((r) => getRelicTotalLv(nextMeta, r.id) === 0);
+    const picked =
+      unowned.length > 0
+        ? unowned[Math.floor(Math.random() * unowned.length)]
+        : tierRelics[Math.floor(Math.random() * tierRelics.length)];
+    if (!picked) return new Decimal(0);
+
+    const prevCrystalLv = nextMeta.relicLevels[picked.id] ?? 0;
+    const prevDropLv = nextMeta.relicDropLevels[picked.id] ?? 0;
+    const prevTotal = prevCrystalLv + prevDropLv;
+
+    if (picked.maxDropLevel !== null && prevDropLv >= picked.maxDropLevel) {
+      const tierBase = RELIC_TIER_META[picked.tier].overflowBaseCrystals;
+      const ngMult =
+        trib.id === 'tier_10' && nextMeta.ngPlusCount > 0
+          ? Decimal.pow(2, nextMeta.ngPlusCount)
+          : new Decimal(1);
+      return new Decimal(tierBase)
+        .mul(ngMult)
+        .mul(getRelicCrystalBonusMult(nextMeta))
+        .floor();
+    }
+
+    nextMeta.relicDropLevels[picked.id] = prevDropLv + 1;
+    const existing = dropAgg[picked.id];
+    dropAgg[picked.id] = {
+      levelsAdded: (existing?.levelsAdded ?? 0) + 1,
+      wasNew: existing ? existing.wasNew : prevTotal === 0,
+    };
+    return new Decimal(0);
+  };
+
+  const buildRelicDropItems = (): VictoryRelicDropItem[] =>
+    Object.entries(dropAgg)
+      .map(([id, info]) => {
+        const rid = id as RelicId;
+        const cfg = RELIC_MAP[rid];
+        const bd = getRelicLevelsBreakdown(nextMeta, rid);
+        return {
+          relicId: rid,
+          tier: cfg.tier,
+          name: cfg.name,
+          levelsAdded: info!.levelsAdded,
+          newDropLevel: bd.dropLv,
+          crystalLevel: bd.crystalLv,
+          totalLevel: bd.totalLv,
+          isNew: info!.wasNew,
+        };
+      })
+      .sort((a, b) => {
+        const tierDiff = RELIC_TIER_META[b.tier].order - RELIC_TIER_META[a.tier].order;
+        return tierDiff !== 0 ? tierDiff : b.levelsAdded - a.levelsAdded;
+      });
+
+  // Mode A: SSS Auto-Repeat Offline Sweep
+  const canAutoSweep =
+    Boolean(nextMeta.autoRepeatEnabled) && Boolean(nextMeta.sssUnlockedAutoRepeat[trib.id]);
+  if (canAutoSweep) {
+    const cycleMs = Math.max(3000, (nextMeta.bestClearTimesMs[trib.id] ?? 15000) / OFFLINE_EFFICIENCY);
+    const sweeps = Math.min(OFFLINE_MAX_SWEEPS, Math.floor(cappedMs / cycleMs));
+    if (sweeps >= 1) {
+      const rankTimeMs = nextMeta.bestClearTimesMs[trib.id] ?? 14900;
+      const { crystalMult, bonusRelicLevels: speedBonusDrops } = evaluateSpeedrunRank(
+        rankTimeMs,
+        trib.order
+      );
+      let crystalsEarnedTotal = new Decimal(0);
+      let overflowCrystalsTotal = new Decimal(0);
+      let unlockedNextOrder: number | null = null;
+      const affixStonesEarned = sweeps * 40;
+
+      for (let s = 0; s < sweeps; s++) {
+        const ngMult =
+          trib.id === 'tier_10' && nextMeta.ngPlusCount > 0
+            ? Decimal.pow(2, nextMeta.ngPlusCount)
+            : new Decimal(1);
+        const crystalBonusMult = getRelicCrystalBonusMult(nextMeta);
+        const sweepCrystals = new Decimal(trib.baseCrystalReward)
+          .mul(ngMult)
+          .mul(crystalMult)
+          .mul(crystalBonusMult)
+          .floor();
+        crystalsEarnedTotal = crystalsEarnedTotal.add(sweepCrystals);
+        nextMeta.totalSlays += 1;
+        nextMeta.clearCounts[trib.id] = (nextMeta.clearCounts[trib.id] ?? 0) + 1;
+
+        const crownLv = getRelicTotalLv(nextMeta, 'rel_e_rarity_crown');
+        const crownExtraDrop =
+          crownLv > 0 && Math.random() < Math.min(0.4, 0.015 * crownLv) ? 1 : 0;
+        const dropRolls =
+          trib.relicDropCount +
+          speedBonusDrops +
+          crownExtraDrop +
+          (trib.id === 'tier_10' ? Math.min(3, Number(nextMeta.ngPlusCount) || 0) : 0);
+
+        for (let d = 0; d < dropRolls; d++) {
+          overflowCrystalsTotal = overflowCrystalsTotal.add(rollRelicDrop());
+        }
+
+        while (nextMeta.highestUnlockedOrder < TRIBULATIONS.length) {
+          const check = getNextTribulationUnlockState(nextMeta);
+          if (!check.nextTrib || !check.canUnlock) break;
+          nextMeta.highestUnlockedOrder = check.nextTrib.order;
+          unlockedNextOrder = check.nextTrib.order;
+        }
+        if (trib.id === 'tier_10') {
+          nextMeta.ngPlusCount += 1;
+        }
+      }
+
+      nextMeta.affixStones += affixStonesEarned;
+      nextMeta.divineCrystals = toDecimal(nextMeta.divineCrystals)
+        .add(crystalsEarnedTotal)
+        .add(overflowCrystalsTotal)
+        .toString();
+
+      return {
+        run,
+        mercs,
+        meta: nextMeta,
+        pendingTutorials,
+        offlineSummary: {
+          elapsedOfflineMs,
+          cappedMs,
+          mode: 'auto_repeat',
+          tribulationId: trib.id,
+          tribulationName: trib.name,
+          clearsGained: sweeps,
+          shellsBroken: sweeps * 10,
+          crystalsGained: crystalsEarnedTotal.toString(),
+          overflowCrystals: overflowCrystalsTotal.toString(),
+          affixStonesGained: affixStonesEarned,
+          stonesGained: '0',
+          unlockedNextOrder,
+          relicDrops: buildRelicDropItems(),
+        },
+      };
+    }
+  }
+
+  // Mode B: Offline Combat Advancement (with 灵枢 auto-upgrades, poison stack ramp & unified DPS)
+  const nextRun: RunState = { ...run };
+  const nextMercs: MercenarySlotState[] = mercs.map((m) => ({ ...m }));
+
+  applyAutoUpgradesCycle(nextRun, nextMercs, nextMeta, {
+    onUnlockAffixTut: () => pushPendingTut('tut_affix'),
+  });
+
+  const savedDps = toDecimal(run.recentTickDps.hero)
+    .add(toDecimal(run.recentTickDps.poison))
+    .add(run.recentTickDps.mercs.reduce((a, v) => a.add(toDecimal(v)), new Decimal(0)));
+
+  const initialBreakdown = getTeamCombatDpsBreakdown(nextRun, nextMercs, nextMeta, { nowMs });
+  const initialEffDps = Decimal.max(initialBreakdown.totalDps, savedDps).mul(OFFLINE_EFFICIENCY);
+  const canPoisonRampOffline = Boolean(nextMercs[1]?.unlocked && nextMercs[1].level > 0);
+  if (initialEffDps.lte(0) && !canPoisonRampOffline) {
+    return { run, mercs, meta: nextMeta, offlineSummary: null, pendingTutorials: [] };
+  }
+
+  let phase = Math.min(Math.max(0, nextRun.phaseIndex), BOSS_SHELLS.length - 1);
+  let hp = toDecimal(nextRun.bossHp);
+  let remSec = cappedMs / 1000;
+  let shellsBroken = 0;
+  let affixStonesGained = 0;
+  let stonesGained = new Decimal(0);
+
+  while (remSec > 0 && phase < BOSS_SHELLS.length) {
+    // Allow Slot 2 poison to build up realistically across an offline shell
+    if (nextMercs[1]?.unlocked && nextMercs[1].level > 0 && nextRun.poisonStacks < 3500) {
+      const m2BaseStats = getHeroStats(nextRun, nextMercs, nextMeta, nowMs);
+      const m2Stats = getMercenaryComputedStats(
+        1,
+        nextMercs,
+        nextRun,
+        nextMeta,
+        m2BaseStats.heroBasePower,
+        m2BaseStats.rawHeroClick,
+        getGlobalMult(nextRun, nextMercs, nextMeta)
+      );
+      const rampSec = Math.min(remSec, 25);
+      const estAttacks = Math.max(
+        1,
+        Math.min(500, Math.floor(rampSec / Math.max(0.05, m2Stats.interval)))
+      );
+      if (nextMercs[1].innateAffix === 'sp_poison_god') {
+        let stacks = nextRun.poisonStacks;
+        for (let a = 0; a < estAttacks && stacks < 3500; a++) {
+          const add = Math.max(1, Math.floor(stacks * 0.02));
+          stacks = Math.min(3500, stacks + add);
+        }
+        nextRun.poisonStacks = stacks;
+      } else {
+        nextRun.poisonStacks = Math.min(3500, nextRun.poisonStacks + estAttacks);
+      }
+    }
+
+    const breakdown = getTeamCombatDpsBreakdown(nextRun, nextMercs, nextMeta, { nowMs });
+    const baseTeamDps =
+      phase === run.phaseIndex ? Decimal.max(breakdown.totalDps, savedDps) : breakdown.totalDps;
+    const effDps = baseTeamDps.mul(OFFLINE_EFFICIENCY);
+
+    const phaseMaxHp = getPhaseMaxHp(trib.id, phase, nextMeta);
+    const regenPerSec = trib.debuff.bossRegenPctPerSec
+      ? phaseMaxHp.mul(trib.debuff.bossRegenPctPerSec)
+      : new Decimal(0);
+    const netDps = effDps.sub(regenPerSec);
+    if (netDps.lte(0)) {
+      break;
+    }
+
+    const timeToBreak = hp.div(netDps).toNumber();
+    const dealt = timeToBreak <= remSec ? hp : netDps.mul(remSec);
+    const sMult = getSpiritStoneMultiplier(
+      nextMercs,
+      { ...nextRun, phaseIndex: phase },
+      nextMeta
+    );
+    const phaseStones = dealt.mul(sMult);
+    stonesGained = stonesGained.add(phaseStones);
+    nextRun.spiritStones = toDecimal(nextRun.spiritStones).add(phaseStones).toString();
+
+    if (timeToBreak <= remSec) {
+      remSec -= Math.max(0.01, timeToBreak);
+      shellsBroken += 1;
+      affixStonesGained += BOSS_SHELLS[phase].baseAffixStones;
+      const pNum = phase + 1;
+      if (nextMeta.firstBreakGiftsClaimed < pNum) {
+        nextMeta.firstBreakGiftsClaimed = pNum;
+        if (pNum === 1) {
+          nextMeta.hasUnlockedPuppet = true;
+          nextRun.spiritStones = toDecimal(nextRun.spiritStones).add(80).toString();
+          stonesGained = stonesGained.add(80);
+          affixStonesGained += 2;
+          pushPendingTut('tut_phase1');
+        } else if (pNum === 2 && !nextMercs[0].unlocked) {
+          nextMercs[0] = {
+            ...nextMercs[0],
+            unlocked: true,
+            archetype: 'merc_sword',
+            level: 1,
+            innateAffix: rollRandomInnateAffix(),
+          };
+          pushPendingTut('tut_merc1');
+        } else if (pNum === 3) {
+          affixStonesGained += 8;
+        } else if (pNum === 4) {
+          nextMeta.unlockedBulkBuy = true;
+        }
+      }
+      phase += 1;
+      nextRun.phaseIndex = Math.min(phase, BOSS_SHELLS.length - 1);
+      if (phase < BOSS_SHELLS.length) {
+        hp = getPhaseMaxHp(trib.id, phase, nextMeta);
+        applyAutoUpgradesCycle(nextRun, nextMercs, nextMeta, {
+          onUnlockAffixTut: () => pushPendingTut('tut_affix'),
+        });
+      } else {
+        hp = new Decimal(0);
+      }
+    } else {
+      hp = hp.sub(dealt).max(1);
+      applyAutoUpgradesCycle(nextRun, nextMercs, nextMeta, {
+        onUnlockAffixTut: () => pushPendingTut('tut_affix'),
+      });
+      remSec = 0;
+    }
+  }
+
+  if (shellsBroken === 0 && stonesGained.lte(0)) {
+    return { run, mercs, meta: nextMeta, offlineSummary: null, pendingTutorials: [] };
+  }
+
+  nextMeta.affixStones += affixStonesGained;
+
+  let crystalsEarnedTotal = new Decimal(0);
+  let overflowCrystalsTotal = new Decimal(0);
+  let unlockedNextOrder: number | null = null;
+  let clearsGained = 0;
+  let finalRun = nextRun;
+  let finalMercs = nextMercs;
+
+  if (phase >= BOSS_SHELLS.length) {
+    clearsGained = 1;
+    const spentMs = Math.max(100, cappedMs - remSec * 1000);
+    const clearTimeMs = nextRun.elapsedMs + spentMs;
+    const { crystalMult, bonusRelicLevels: speedBonusDrops } = evaluateSpeedrunRank(
+      clearTimeMs,
+      trib.order
+    );
+    const ngMult =
+      trib.id === 'tier_10' && nextMeta.ngPlusCount > 0
+        ? Decimal.pow(2, nextMeta.ngPlusCount)
+        : new Decimal(1);
+    crystalsEarnedTotal = new Decimal(trib.baseCrystalReward)
+      .mul(ngMult)
+      .mul(crystalMult)
+      .mul(getRelicCrystalBonusMult(nextMeta))
+      .floor();
+    nextMeta.divineCrystals = toDecimal(nextMeta.divineCrystals).add(crystalsEarnedTotal).toString();
+    nextMeta.totalSlays += 1;
+    nextMeta.clearCounts[trib.id] = (nextMeta.clearCounts[trib.id] ?? 0) + 1;
+    const prevBest = nextMeta.bestClearTimesMs[trib.id];
+    if (prevBest === undefined || clearTimeMs < prevBest) {
+      nextMeta.bestClearTimesMs[trib.id] = clearTimeMs;
+    }
+    if (!nextMeta.clearedTribulations[trib.id]) {
+      nextMeta.clearedTribulations[trib.id] = true;
+      if (trib.id === 'tier_1') {
+        nextMeta.unlockedRelicHall = true;
+        pushPendingTut('tut_tier1_win');
+      }
+      if (trib.id === 'tier_2') {
+        nextMeta.unlockedAffixLock = true;
+        nextMeta.unlockedInnateReroll = true;
+      }
+      if (trib.id === 'tier_3') {
+        nextMeta.unlockedEpicPool = true;
+        nextMeta.unlockedAutoRealm = true;
+      }
+      if (trib.id === 'tier_4') nextMeta.unlockedAutoSkill = true;
+      if (trib.id === 'tier_5') {
+        nextMeta.affixStones += 50;
+        affixStonesGained += 50;
+        nextMeta.unlockedAutoHeroUpgrades = true;
+      }
+      if (trib.id === 'tier_6') nextMeta.unlockedAutoMercUpgrade = true;
+    }
+
+    const crownLv = getRelicTotalLv(nextMeta, 'rel_e_rarity_crown');
+    const crownExtraDrop =
+      crownLv > 0 && Math.random() < Math.min(0.4, 0.015 * crownLv) ? 1 : 0;
+    const dropRolls =
+      trib.relicDropCount +
+      speedBonusDrops +
+      crownExtraDrop +
+      (trib.id === 'tier_10' ? Math.min(3, Number(nextMeta.ngPlusCount) || 0) : 0);
+    for (let d = 0; d < dropRolls; d++) {
+      overflowCrystalsTotal = overflowCrystalsTotal.add(rollRelicDrop());
+    }
+    if (overflowCrystalsTotal.gt(0)) {
+      nextMeta.divineCrystals = toDecimal(nextMeta.divineCrystals)
+        .add(overflowCrystalsTotal)
+        .toString();
+    }
+
+    while (nextMeta.highestUnlockedOrder < TRIBULATIONS.length) {
+      const check = getNextTribulationUnlockState(nextMeta);
+      if (!check.nextTrib || !check.canUnlock) break;
+      nextMeta.highestUnlockedOrder = check.nextTrib.order;
+      unlockedNextOrder = check.nextTrib.order;
+    }
+    if (trib.id === 'tier_10') {
+      nextMeta.ngPlusCount += 1;
+    }
+
+    finalRun = createInitialRunState(trib.id, nextMeta, {
+      sk_blood: run.skills.sk_blood.autoCast,
+      sk_clone: run.skills.sk_clone.autoCast,
+      sk_thunder: run.skills.sk_thunder.autoCast,
+      sk_sync: run.skills.sk_sync.autoCast,
+    });
+    finalMercs = resetMercsForNewRun(nextMercs);
+  } else {
+    nextRun.phaseIndex = phase;
+    nextRun.bossHp = hp.toString();
+    nextRun.bossMaxHp = getPhaseMaxHp(trib.id, phase, nextMeta).toString();
+    nextRun.elapsedMs += cappedMs;
+    nextRun.timerStarted = true;
+    const endBreakdown = getTeamCombatDpsBreakdown(nextRun, nextMercs, nextMeta, { nowMs });
+    nextRun.recentTickDps = {
+      hero: endBreakdown.heroDps.toString(),
+      poison: endBreakdown.poisonTotalDps.toString(),
+      mercs: endBreakdown.mercDpsList.map((d) => d.toString()) as [
+        string,
+        string,
+        string,
+        string,
+        string,
+      ],
+    };
+  }
+
+  return {
+    run: finalRun,
+    mercs: finalMercs,
+    meta: nextMeta,
+    pendingTutorials,
+    offlineSummary: {
+      elapsedOfflineMs,
+      cappedMs,
+      mode: 'combat',
+      tribulationId: trib.id,
+      tribulationName: trib.name,
+      clearsGained,
+      shellsBroken,
+      crystalsGained: crystalsEarnedTotal.toString(),
+      overflowCrystals: overflowCrystalsTotal.toString(),
+      affixStonesGained,
+      stonesGained: stonesGained.toString(),
+      unlockedNextOrder,
+      relicDrops: buildRelicDropItems(),
+    },
+  };
+}
+
 function loadSavedState(): {
   run: RunState;
   mercs: MercenarySlotState[];
   meta: MetaState;
   settings: SettingsState;
+  offlineSummary: OfflineSummary | null;
+  pendingTutorials: TutorialNodeId[];
 } {
   const defaultMeta = createInitialMetaState();
   const defaultMercs = createInitialMercsState();
@@ -514,6 +1224,8 @@ function loadSavedState(): {
         mercs: defaultMercs,
         meta: defaultMeta,
         settings: defaultSettings,
+        offlineSummary: null,
+        pendingTutorials: [],
       };
     }
     const parsed = JSON.parse(raw) as Partial<GameSaveData>;
@@ -556,11 +1268,19 @@ function loadSavedState(): {
 
     const baseRun = createInitialRunState(tribId, meta);
     if (parsed.run?.runCompleted) {
+      const settled = settleOfflineProgress(
+        parsed.savedAt,
+        baseRun,
+        resetMercsForNewRun(mercs),
+        meta
+      );
       return {
-        run: baseRun,
-        mercs: resetMercsForNewRun(mercs),
-        meta,
+        run: settled.run,
+        mercs: settled.mercs,
+        meta: settled.meta,
         settings,
+        offlineSummary: settled.offlineSummary,
+        pendingTutorials: settled.pendingTutorials,
       };
     }
 
@@ -572,7 +1292,7 @@ function loadSavedState(): {
       phaseIndex: safeInt(parsed.run?.phaseIndex, 0, 0, BOSS_SHELLS.length - 1),
       bossHp: safeDecimalStr(parsed.run?.bossHp, baseRun.bossHp),
       bossMaxHp: safeDecimalStr(parsed.run?.bossMaxHp, baseRun.bossMaxHp),
-      poisonStacks: safeInt(parsed.run?.poisonStacks, 0, 0, 1e12),
+      poisonStacks: safeInt(parsed.run?.poisonStacks, 0, 0, 3500),
       spiritStones: safeDecimalStr(parsed.run?.spiritStones, baseRun.spiritStones),
       mana: safeFloat(parsed.run?.mana, baseRun.mana, 0, 100000),
       clickStacks: safeDecimalStr(parsed.run?.clickStacks, '0'),
@@ -617,13 +1337,23 @@ function loadSavedState(): {
       },
     };
 
-    return { run, mercs, meta, settings };
+    const settled = settleOfflineProgress(parsed.savedAt, run, mercs, meta);
+    return {
+      run: settled.run,
+      mercs: settled.mercs,
+      meta: settled.meta,
+      settings,
+      offlineSummary: settled.offlineSummary,
+      pendingTutorials: settled.pendingTutorials,
+    };
   } catch {
     return {
       run: createInitialRunState('tier_1', defaultMeta),
       mercs: defaultMercs,
       meta: defaultMeta,
       settings: defaultSettings,
+      offlineSummary: null,
+      pendingTutorials: [],
     };
   }
 }
@@ -648,11 +1378,13 @@ interface GameContextValue {
   hitPulseId: number;
   shellShatterId: number;
   victorySummary: VictorySummary | null;
+  offlineSummary: OfflineSummary | null;
   lastClearReport: SilentClearReport | null;
   autoRepeatCountdown: number | null;
   toastMessage: string | null;
   activeTutorial: TutorialNodeId | null;
   clearVictorySummary: () => void;
+  clearOfflineSummary: () => void;
   openLastClearReportModal: () => void;
   quickRestartAfterSilentClear: () => void;
   completeIntro: () => void;
@@ -723,10 +1455,16 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [hitPulseId, setHitPulseId] = useState(0);
   const [shellShatterId, setShellShatterId] = useState(0);
   const [victorySummary, setVictorySummary] = useState<VictorySummary | null>(null);
+  const [offlineSummary, setOfflineSummary] = useState<OfflineSummary | null>(
+    () => initialRef.current?.offlineSummary ?? null
+  );
   const [lastClearReport, setLastClearReport] = useState<SilentClearReport | null>(null);
   const [autoRepeatCountdown, setAutoRepeatCountdown] = useState<number | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const [activeTutorial, setActiveTutorial] = useState<TutorialNodeId | null>(null);
+  const [pendingTutorials, setPendingTutorials] = useState<TutorialNodeId[]>(
+    () => initialRef.current?.pendingTutorials ?? []
+  );
+  const activeTutorial = pendingTutorials[0] ?? null;
   const [lastSavedAt, setLastSavedAt] = useState<number>(() => Date.now());
 
   const runRef = useRef(run);
@@ -786,7 +1524,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const queueTutorial = useCallback((id: TutorialNodeId, targetMeta: MetaState) => {
     if (!targetMeta.shownTutorials[id]) {
       targetMeta.shownTutorials = { ...targetMeta.shownTutorials, [id]: true };
-      setActiveTutorial((cur) => cur ?? id);
+      setPendingTutorials((q) => (q.includes(id) ? q : [...q, id]));
     }
   }, []);
 
@@ -933,7 +1671,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           // rel_e_boss_skip (Phase 1~8)
           const skipLv = getRelicTotalLv(nextMeta, 'rel_e_boss_skip');
           let skippedExtra = false;
-          if (phase <= 7 && skipLv > 0 && Math.random() < Math.min(0.75, 0.025 * skipLv)) {
+          if (phase <= 7 && skipLv > 0 && Math.random() < Math.min(0.45, 0.015 * skipLv)) {
             skippedExtra = true;
             stonesGain *= 2;
           }
@@ -993,7 +1731,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
             hp = nextMax;
             nextRun.bossMaxHp = nextMax.toString();
 
-            // rel_y_shell_burst: shatter shockwave deals (1.0 * lv) seconds of team DPS to the newly exposed shell
+            // rel_y_shell_burst: shatter shockwave deals (0.20 * lv) seconds of team DPS to the newly exposed shell
             const shellBurstLv = getRelicTotalLv(nextMeta, 'rel_y_shell_burst');
             if (shellBurstLv > 0) {
               const curTeamDps = toDecimal(nextRun.recentTickDps.hero)
@@ -1005,15 +1743,15 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
                   )
                 );
               if (curTeamDps.gt(0)) {
-                remaining = remaining.add(curTeamDps.mul(1.0 * shellBurstLv));
+                remaining = remaining.add(curTeamDps.mul(0.2 * shellBurstLv));
               }
             }
 
-            // rel_s_stone_surge: instant stone rebate on shell break (max 25%)
+            // rel_s_stone_surge: instant stone rebate on shell break (max 8%)
             const stoneSurgeLv = getRelicTotalLv(nextMeta, 'rel_s_stone_surge');
             if (stoneSurgeLv > 0) {
               const curStones = toDecimal(nextRun.spiritStones);
-              const bonusStones = curStones.mul(Math.min(0.25, 0.01 * stoneSurgeLv));
+              const bonusStones = curStones.mul(Math.min(0.08, 0.004 * stoneSurgeLv));
               if (bonusStones.gt(0)) {
                 nextRun.spiritStones = curStones.add(bonusStones).toString();
               }
@@ -1452,16 +2190,16 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // Slot 2 Talent 1 (剧毒蔓延) or sp_poison_god
+      // Slot 2 Talent 1 (剧毒蔓延) or sp_poison_god (capped at 3500 stacks, +2%/hit ramp)
       if (slotIdx === 1) {
-        const MAX_POISON_STACKS = 1e12;
+        const MAX_POISON_STACKS = 3500;
         if (slot.innateAffix === 'sp_poison_god') {
           if (nextRun.poisonStacks <= 0) {
             nextRun.poisonStacks = 3;
           } else {
             nextRun.poisonStacks = Math.min(
               MAX_POISON_STACKS,
-              Math.max(nextRun.poisonStacks + 1, Math.ceil(nextRun.poisonStacks * 1.05))
+              Math.max(nextRun.poisonStacks + 3, Math.ceil(nextRun.poisonStacks * 1.02))
             );
           }
         } else {
@@ -1661,7 +2399,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       const echoLv = getRelicTotalLv(nextMeta, 'rel_m_click_echo');
       if (echoLv > 0) {
         nextRun.sharedHeroGrowth = toDecimal(nextRun.sharedHeroGrowth)
-          .add(totalGrowthGain.mul(Math.min(2.0, 0.1 * echoLv)))
+          .add(totalGrowthGain.mul(Math.min(1.2, 0.06 * echoLv)))
           .toString();
       }
 
@@ -1776,7 +2514,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
               heroStats.rawHeroClick,
               globalNow
             );
-            volleyDmg = volleyDmg.add(st.expectedDmg.mul(0.1 * clickStormLv));
+            volleyDmg = volleyDmg.add(st.expectedDmg.mul(0.04 * clickStormLv));
           }
           if (volleyDmg.gt(0)) {
             const stormRes = applyBossDamageAndCheckBreaks(
@@ -2062,235 +2800,42 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         }
       }
 
-      // Smooth DPS estimate for HUD
-      const latestStats = getHeroStats(nextRun, nextMercs, nextMeta, nowMs);
-      const latestGlobal = getGlobalMult(nextRun, nextMercs, nextMeta);
-      const cloneRateNow =
-        nextRun.skills.sk_clone.activeRemaining > 0
-          ? getSkillEffectiveValues(
-              'sk_clone',
-              nextRun.skills.sk_clone.level,
-              nextMercs,
-              nextMeta
-            ).effectValue
-          : 0;
-      const heroEstDps = latestStats.expectedHeroClick.mul(
-        latestStats.puppetRate * latestStats.puppetOverflowMult + cloneRateNow
-      );
-      const poisonEstDps = getPoisonTickExpectedDamage(
-        nextMercs,
-        nextRun,
-        nextMeta,
-        latestStats.heroBasePower,
-        latestStats.rawHeroClick,
-        latestGlobal
-      ).expectedPoison;
-
-      const mercDpsStrings = nextMercs.map((m, idx) =>
-        m.unlocked && m.level > 0
-          ? getMercenaryComputedStats(
-              idx,
-              nextMercs,
-              nextRun,
-              nextMeta,
-              latestStats.heroBasePower,
-              latestStats.rawHeroClick,
-              latestGlobal
-            ).dpsEstimate.toString()
-          : '0'
-      ) as [string, string, string, string, string];
+      // Smooth DPS estimate for HUD (single source of truth)
+      const liveBreakdown = getTeamCombatDpsBreakdown(nextRun, nextMercs, nextMeta, { nowMs });
+      const mercDpsStrings = liveBreakdown.mercDpsList.map((d) => d.toString()) as [
+        string,
+        string,
+        string,
+        string,
+        string,
+      ];
 
       nextRun.recentTickDps = {
-        hero: heroEstDps.toString(),
-        poison: poisonEstDps.toString(),
+        hero: liveBreakdown.heroDps.toString(),
+        poison: liveBreakdown.poisonTotalDps.toString(),
         mercs: mercDpsStrings,
       };
 
-      // Late-game灵枢 Automation Cycle (runs every 0.25s)
+      // Late-game灵枢 Automation Cycle (runs every 0.25s; Tier 6 Mercs prioritized before Tier 5)
       autoBuyAccRef.current += dt;
       let autoPurchased = false;
       if (autoBuyAccRef.current >= 0.25 && !nextRun.runCompleted) {
         autoBuyAccRef.current = 0;
-        const autoCfg = nextMeta.autoSettings;
-        const costRedNow = getCostReductionMult(nextMeta);
-
-        // Tier 3 Unlock: Auto Realm Breakthrough & Auto Puppet
-        if (nextMeta.unlockedAutoRealm) {
-          if (autoCfg.autoRealm) {
-            let realmLoop = 0;
-            while (realmLoop < 5) {
-              realmLoop++;
-              const nextInfo = getRealmInfo(nextRun.realmLevel + 1);
-              const curStones = toDecimal(nextRun.spiritStones);
-              const curClicks = toDecimal(nextRun.clickStacks);
-              if (
-                curStones.lt(nextInfo.reqStones) ||
-                (nextInfo.reqClicks > 0 && curClicks.lt(nextInfo.reqClicks))
-              ) {
-                break;
-              }
-              nextRun.spiritStones = curStones.sub(nextInfo.reqStones).toString();
-              nextRun.realmLevel += 1;
-              autoPurchased = true;
+        autoPurchased = applyAutoUpgradesCycle(nextRun, nextMercs, nextMeta, {
+          onUnlockAffixTut: () => queueTutorial('tut_affix', nextMeta),
+          onThousandMilestone: (mercName) => {
+            if (!nextMeta.autoRepeatEnabled && !settingsRef.current.silentAutoClear) {
+              soundEngine.playBurst();
+              showToast(`${mercName} 千级圆满！开启第 10 重道纹并获赠 50 神晶！`);
             }
-          }
-
-          if (autoCfg.autoPuppet && nextMeta.hasUnlockedPuppet && nextRun.puppetLevel < PUPPET_MAX_LEVEL) {
-            const curStones = toDecimal(nextRun.spiritStones);
-            const pupGrowth = getEffectiveGrowthRate(PUPPET_COST_GROWTH, nextRun.tribulationId);
-            const { count, totalCost } = calculateBulkUpgrade(
-              new Decimal(PUPPET_UNLOCK_COST),
-              pupGrowth,
-              nextRun.puppetLevel + 1,
-              costRedNow,
-              'MAX',
-              curStones,
-              PUPPET_MAX_LEVEL + 1
-            );
-            if (count > 0 && curStones.gte(totalCost)) {
-              nextRun.spiritStones = curStones.sub(totalCost).toString();
-              nextRun.puppetLevel = Math.min(PUPPET_MAX_LEVEL, nextRun.puppetLevel + count);
-              autoPurchased = true;
-            }
-          }
-        }
-
-        // Tier 5 Unlock: Auto Enlightenment & Auto Skill Upgrade
-        if (nextMeta.unlockedAutoHeroUpgrades) {
-          if (autoCfg.autoEnlightenment) {
-            const curStones = toDecimal(nextRun.spiritStones);
-            const enlGrowth = getEffectiveGrowthRate(
-              ENLIGHTENMENT_COST_GROWTH,
-              nextRun.tribulationId
-            );
-            const { count, totalCost } = calculateBulkUpgrade(
-              new Decimal(ENLIGHTENMENT_BASE_COST),
-              enlGrowth,
-              nextRun.enlightenmentLevel,
-              costRedNow,
-              'MAX',
-              curStones
-            );
-            if (count > 0 && curStones.gte(totalCost)) {
-              const prevGrowth = getHeroGrowthPerClick(nextRun, nextMercs, nextMeta);
-              nextRun.spiritStones = curStones.sub(totalCost).toString();
-              nextRun.enlightenmentLevel += count;
-              const nextGrowth = getHeroGrowthPerClick(nextRun, nextMercs, nextMeta);
-              const enlightRelicLv = getRelicTotalLv(nextMeta, 'rel_r_enlight_boost');
-              if (enlightRelicLv > 0) {
-                const resGain = Decimal.max(0, nextGrowth.sub(prevGrowth)).mul(0.1);
-                nextRun.sharedHeroGrowth = toDecimal(nextRun.sharedHeroGrowth)
-                  .add(resGain)
-                  .toString();
-              }
-              autoPurchased = true;
-            }
-          }
-
-          if (autoCfg.autoSkills) {
-            for (const skCfg of SKILLS) {
-              if (nextRun.realmLevel < skCfg.unlockRealm) continue;
-              const curStones = toDecimal(nextRun.spiritStones);
-              const skGrowth = getEffectiveGrowthRate(skCfg.costGrowth, nextRun.tribulationId);
-              const curLv = nextRun.skills[skCfg.id].level;
-              const { count, totalCost } = calculateBulkUpgrade(
-                new Decimal(skCfg.baseUpgradeCost),
-                skGrowth,
-                curLv,
-                costRedNow,
-                'MAX',
-                curStones
-              );
-              if (count > 0 && curStones.gte(totalCost)) {
-                nextRun.spiritStones = curStones.sub(totalCost).toString();
-                nextRun.skills[skCfg.id] = {
-                  ...nextRun.skills[skCfg.id],
-                  level: curLv + count,
-                };
-                autoPurchased = true;
-              }
-            }
-          }
-        }
-
-        // Tier 6 Unlock: Auto Mercenary Upgrade (evaluated 5 -> 1 so late slots get priority)
-        if (nextMeta.unlockedAutoMercUpgrade && autoCfg.autoMercs) {
-          const luckLv = getRelicTotalLv(nextMeta, 'rel_e_affix_luck');
-          for (let sIdx = nextMercs.length - 1; sIdx >= 0; sIdx--) {
-            if (!autoCfg.autoMercSlots[sIdx]) continue;
-            const slot = nextMercs[sIdx];
-            if (!slot || !slot.unlocked) continue;
-
-            const arch = ARCHETYPES[slot.archetype];
-            const curStones = toDecimal(nextRun.spiritStones);
-            const mGrowth = getEffectiveGrowthRate(arch.growthRate, nextRun.tribulationId);
-            const cheapDiscount = getMercCheapDiscount(slot, nextMercs, nextMeta);
-            const { count, totalCost } = calculateBulkUpgrade(
-              new Decimal(arch.baseCost),
-              mGrowth,
-              slot.level,
-              costRedNow * (1 - cheapDiscount),
-              'MAX',
-              curStones
-            );
-            if (count <= 0 || curStones.lt(totalCost)) continue;
-
-            let bonusLevels = 0;
-            if (slot.innateAffix === 'sp_free_up') {
-              const rolls = Math.min(count, 2000);
-              for (let r = 0; r < rolls; r++) {
-                if (Math.random() < 0.35) bonusLevels++;
-              }
-            }
-
-            const newLv = slot.level + count + bonusLevels;
-            const effLv = slot.innateAffix === 'sp_double_lvl' ? newLv * 2 : newLv;
-            const prevOpen = slot.unlockedLevelSlots;
-            let nextOpen = prevOpen;
-            const nextAffixes = [...slot.levelAffixes];
-            for (let k = 0; k < LEVEL_SLOT_THRESHOLDS.length; k++) {
-              if (effLv >= LEVEL_SLOT_THRESHOLDS[k]) {
-                if (k + 1 > nextOpen) nextOpen = k + 1;
-                if (!nextAffixes[k]) {
-                  nextAffixes[k] = {
-                    id: rollRandomAffixId(),
-                    tier: rollAffixTier(luckLv),
-                  };
-                }
-              }
-            }
-
-            if (prevOpen === 0 && nextOpen >= 1) {
-              queueTutorial('tut_affix', nextMeta);
-            }
-            if (prevOpen < 10 && nextOpen === 10) {
-              nextMeta.divineCrystals = toDecimal(nextMeta.divineCrystals).add(50).toString();
-              if (!nextMeta.autoRepeatEnabled && !settingsRef.current.silentAutoClear) {
-                soundEngine.playBurst();
-                showToast(`${arch.name} 千级圆满！开启第 10 重道纹并获赠 50 神晶！`);
-              }
-            }
-
-            nextRun.spiritStones = curStones.sub(totalCost).toString();
-            nextMercs[sIdx] = {
-              ...slot,
-              level: newLv,
-              unlockedLevelSlots: nextOpen,
-              levelAffixes: nextAffixes,
-            };
-            autoPurchased = true;
-          }
-        }
+          },
+        });
       }
 
       // Update lifetime playtime & highest DPS
       nextMeta.totalPlayTimeMs += dt * 1000;
-      const totalDpsNow = mercDpsStrings.reduce(
-        (acc, v) => acc.add(toDecimal(v)),
-        heroEstDps.add(poisonEstDps)
-      );
-      if (totalDpsNow.gt(toDecimal(nextMeta.highestDps))) {
-        nextMeta.highestDps = totalDpsNow.toString();
+      if (liveBreakdown.totalDps.gt(toDecimal(nextMeta.highestDps))) {
+        nextMeta.highestDps = liveBreakdown.totalDps.toString();
       }
 
       const prevBrokenPhase = prevRun.phaseIndex;
@@ -2371,7 +2916,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const dismissTutorial = useCallback(() => {
-    setActiveTutorial(null);
+    setPendingTutorials((q) => q.slice(1));
   }, []);
 
   const manualClick = useCallback(
@@ -2443,7 +2988,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     const enlightRelicLv = getRelicTotalLv(metaRef.current, 'rel_r_enlight_boost');
     const gainedResonance =
       enlightRelicLv > 0
-        ? Decimal.max(0, nextGrowth.sub(prevGrowth)).mul(0.1)
+        ? Decimal.max(0, nextGrowth.sub(prevGrowth)).mul(0.04 + 0.03 * enlightRelicLv)
         : new Decimal(0);
     const next: RunState = {
       ...nextRunDraft,
@@ -3090,6 +3635,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         sk_thunder: runRef.current.skills.sk_thunder.autoCast,
         sk_sync: runRef.current.skills.sk_sync.autoCast,
       };
+      const prevTribId = runRef.current.tribulationId;
       const freshRun = createInitialRunState(tribId, metaRef.current, autoCasts);
       const freshMercs = resetMercsForNewRun(mercsRef.current);
       victoryTriggeredRef.current = false;
@@ -3106,7 +3652,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       setMercs(freshMercs);
       setVictorySummary(null);
       setAutoRepeatCountdown(null);
-      if (tribId !== runRef.current.tribulationId) {
+      if (tribId !== prevTribId) {
         setLastClearReport(null);
       }
       saveToLocalStorage();
@@ -3417,7 +3963,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
             phaseIndex: safeInt(parsed.run.phaseIndex, 0, 0, BOSS_SHELLS.length - 1),
             bossHp: safeDecimalStr(parsed.run.bossHp, baseRun.bossHp),
             bossMaxHp: safeDecimalStr(parsed.run.bossMaxHp, baseRun.bossMaxHp),
-            poisonStacks: safeInt(parsed.run.poisonStacks, 0, 0, 1e12),
+            poisonStacks: safeInt(parsed.run.poisonStacks, 0, 0, 3500),
             spiritStones: safeDecimalStr(parsed.run.spiritStones, baseRun.spiritStones),
             mana: safeFloat(parsed.run.mana, baseRun.mana, 0, 100000),
             clickStacks: safeDecimalStr(parsed.run.clickStacks, '0'),
@@ -3552,7 +4098,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       setVictorySummary(null);
       setLastClearReport(null);
       setAutoRepeatCountdown(null);
-      setActiveTutorial(null);
+      setPendingTutorials([]);
 
       if (reloadAfter && typeof window !== 'undefined') {
         window.location.reload();
@@ -3569,6 +4115,10 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     autoRepeatCountdownRef.current = null;
     setVictorySummary(null);
     setAutoRepeatCountdown(null);
+  }, []);
+
+  const clearOfflineSummary = useCallback(() => {
+    setOfflineSummary(null);
   }, []);
 
   const openLastClearReportModal = useCallback(() => {
@@ -3621,11 +4171,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         hitPulseId,
         shellShatterId,
         victorySummary,
+        offlineSummary,
         lastClearReport,
         autoRepeatCountdown,
         toastMessage,
         activeTutorial,
         clearVictorySummary,
+        clearOfflineSummary,
         openLastClearReportModal,
         quickRestartAfterSilentClear,
         completeIntro,

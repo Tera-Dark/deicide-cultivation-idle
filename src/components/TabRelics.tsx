@@ -1,5 +1,14 @@
 import { useMemo, useState } from 'react';
-import { ChevronDown, ChevronUp, Compass, Crown, EyeOff, Lock, Sparkles } from 'lucide-react';
+import {
+  BarChart3,
+  ChevronDown,
+  ChevronUp,
+  Compass,
+  Crown,
+  EyeOff,
+  Lock,
+  Sparkles,
+} from 'lucide-react';
 import { TRIBULATIONS } from '../config/bosses';
 import {
   RELICS,
@@ -10,7 +19,7 @@ import {
   getRelicLevelsBreakdown,
   getTribulationEffectiveDropOdds,
 } from '../config/relics';
-import { getTotalRelicLevels } from '../core/damageCalc';
+import { getRelicPoolBreakdown, getTotalRelicLevels } from '../core/damageCalc';
 import { formatNumber, toDecimal } from '../core/formatNumber';
 import { getRelicUpgradeCost, useGameStore } from '../stores/useGameStore';
 import type { RelicConfig, RelicTier } from '../types/game';
@@ -18,13 +27,15 @@ import type { RelicConfig, RelicTier } from '../types/game';
 type TierFilter = 'all' | RelicTier;
 
 export function TabRelics() {
-  const { meta, settings, upgradeRelic } = useGameStore();
+  const { run, mercs, meta, settings, upgradeRelic } = useGameStore();
   const [filter, setFilter] = useState<TierFilter>('all');
   const [showDropGuide, setShowDropGuide] = useState(false);
+  const [showPoolSummary, setShowPoolSummary] = useState(false);
 
   const crystals = toDecimal(meta.divineCrystals);
   const dropOverview = getRelicDropOverview(meta);
   const totalRelicLevels = getTotalRelicLevels(meta);
+  const poolBreakdown = getRelicPoolBreakdown(run, mercs, meta);
   const totalOwned = RELICS.filter((r) => getRelicLevelsBreakdown(meta, r.id).owned).length;
   const dropLuckScore = getDropRarityLuckScore(meta);
 
@@ -186,6 +197,84 @@ export function TabRelics() {
                   })}
                 </div>
               </div>
+            </div>
+          )}
+        </div>
+
+        {/* Collapsible 4-Pool Relic Multiplier Breakdown */}
+        <div className="pt-2 border-t border-white/8">
+          <button
+            type="button"
+            onClick={() => setShowPoolSummary((v) => !v)}
+            className="w-full min-h-[44px] flex items-center justify-between gap-2 text-xs text-[#cbd5e1] hover:text-white cursor-pointer"
+          >
+            <span className="inline-flex items-center gap-2 min-w-0">
+              <BarChart3 className="w-4 h-4 text-[#c084fc] shrink-0" />
+              <span className="font-bold text-[#e2e8f0] shrink-0">圣殿四大乘区实时总览</span>
+              <span className="font-mono-num text-[11px] text-[#34d399] truncate">
+                战术池 ×{poolBreakdown.tacticalPoolMult.toFixed(2)} · 终局池 ×
+                {formatNumber(poolBreakdown.infinityPoolMult, settings.numberMode)}
+              </span>
+            </span>
+            <span className="inline-flex items-center gap-1 text-[#c084fc] font-semibold shrink-0 whitespace-nowrap">
+              <span>{showPoolSummary ? '收起' : '展开'}</span>
+              {showPoolSummary ? (
+                <ChevronUp className="w-4 h-4" />
+              ) : (
+                <ChevronDown className="w-4 h-4" />
+              )}
+            </span>
+          </button>
+
+          {showPoolSummary && (
+            <div className="mt-2.5 rounded-xl bg-[#101322] border border-[#2e3552] p-3 space-y-2 text-xs">
+              <div className="grid grid-cols-2 gap-2 font-mono-num">
+                <div className="rounded-lg bg-[#151827] border border-white/8 p-2.5 space-y-1">
+                  <div className="text-[11px] text-[#94a3b8]">① 战力基础池（同池加算）</div>
+                  <div className="font-bold text-[#67e8f9]">
+                    主角点击 ×{poolBreakdown.heroClickMult.toFixed(2)}
+                  </div>
+                  <div className="text-[11px] text-[#cbd5e1]">
+                    全护法通用 +{(poolBreakdown.mercBaseAllPct * 100).toFixed(0)}%（与专精同池加算）
+                  </div>
+                </div>
+
+                <div className="rounded-lg bg-[#151827] border border-white/8 p-2.5 space-y-1">
+                  <div className="text-[11px] text-[#94a3b8]">② 战术终伤池（同池加算）</div>
+                  <div className="font-bold text-[#34d399]">
+                    当前合计 ×{poolBreakdown.tacticalPoolMult.toFixed(2)}
+                  </div>
+                  <div className="text-[11px] text-[#cbd5e1]">
+                    蓄锋+{(poolBreakdown.tacticalBreakdown.manaBlade * 100).toFixed(0)}% · 斩杀+
+                    {(poolBreakdown.tacticalBreakdown.execute * 100).toFixed(0)}% · 道海+
+                    {(poolBreakdown.tacticalBreakdown.voidMana * 100).toFixed(0)}%
+                  </div>
+                </div>
+
+                <div className="rounded-lg bg-[#151827] border border-white/8 p-2.5 space-y-1">
+                  <div className="text-[11px] text-[#94a3b8]">③ 终局复利池（仙+神复利）</div>
+                  <div className="font-bold text-[#fbbf24]">
+                    ×{formatNumber(poolBreakdown.infinityPoolMult, settings.numberMode)}
+                  </div>
+                  <div className="text-[11px] text-[#cbd5e1]">
+                    弑神道果 × 不可名状之核长线复利叠层
+                  </div>
+                </div>
+
+                <div className="rounded-lg bg-[#151827] border border-white/8 p-2.5 space-y-1">
+                  <div className="text-[11px] text-[#94a3b8]">④ 经济与减抗池（有封顶）</div>
+                  <div className="font-bold text-[#c084fc]">
+                    神晶 ×{poolBreakdown.crystalMult.toFixed(2)}
+                  </div>
+                  <div className="text-[11px] text-[#cbd5e1]">
+                    价格 ×{poolBreakdown.costMult.toFixed(2)} · BOSS血 ×
+                    {poolBreakdown.bossHpMult.toFixed(2)}
+                  </div>
+                </div>
+              </div>
+              <p className="text-[11px] text-[#94a3b8] leading-relaxed">
+                圣殿重构为“战力基础池 × 战术终伤池 × 终局复利池”三主乘区，避免低层遗物虚高秒杀中后期，鼓励多轮刷劫印叠层与神晶长线累积。
+              </p>
             </div>
           )}
         </div>

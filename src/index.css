@@ -3,9 +3,9 @@
 
 @layer base {
   :root {
-    --font-display: 'Noto Serif SC', serif;
-    --font-sans: 'Noto Sans SC', system-ui, -apple-system, sans-serif;
-    --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+    --font-display: 'Songti SC', 'Noto Serif SC', 'STSong', 'Source Han Serif SC', 'SimSun', serif;
+    --font-sans: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans SC', system-ui, -apple-system, sans-serif;
+    --font-mono: 'SFMono-Regular', 'JetBrains Mono', 'Cascadia Mono', 'Consolas', ui-monospace, monospace;
   }
 
   html,

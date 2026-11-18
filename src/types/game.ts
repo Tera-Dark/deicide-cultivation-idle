@@ -351,6 +351,22 @@ export interface SilentClearReport {
   summary: VictorySummary;
 }
 
+export interface OfflineSummary {
+  elapsedOfflineMs: number;
+  cappedMs: number;
+  mode: 'auto_repeat' | 'combat';
+  tribulationId: TribulationId;
+  tribulationName: string;
+  clearsGained: number;
+  shellsBroken: number;
+  crystalsGained: string;
+  overflowCrystals: string;
+  affixStonesGained: number;
+  stonesGained: string;
+  unlockedNextOrder: number | null;
+  relicDrops: VictoryRelicDropItem[];
+}
+
 export interface ArchetypeConfig {
   id: ArchetypeId;
   slotIndex: number;

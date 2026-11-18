@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Decimal from 'break_infinity.js';
 import {
   Activity,
@@ -13,6 +13,9 @@ import {
   Copy,
   Crown,
   Dices,
+  Download,
+  FileText,
+  FileUp,
   Film,
   Lock,
   LockOpen,
@@ -22,6 +25,7 @@ import {
   Repeat,
   Save,
   ShieldAlert,
+  ShieldCheck,
   Smartphone,
   Sparkles,
   Trophy,
@@ -54,9 +58,8 @@ import {
   getGlobalMult,
   getHeroStats,
   getMercenaryComputedStats,
-  getPoisonTickExpectedDamage,
   getRelicTotalLv,
-  getSkillEffectiveValues,
+  getTeamCombatDpsBreakdown,
   getTotalRelicLevels,
   isSlot5Active,
 } from '../core/damageCalc';
@@ -65,6 +68,7 @@ import { useGameStore } from '../stores/useGameStore';
 import type { MercenarySlotState, MetaState, RunState, TutorialNodeId } from '../types/game';
 import { ArchetypeIcon } from './ArchetypeIcon';
 import { PhaseBreakSigilIcon } from './CultivationIcons';
+import { PWAInstallButton } from './PWAInstallButton';
 import coverBannerImg from '../assets/images/taptap_cover_banner_1794919855982.jpg';
 import taptapIconImg from '../assets/images/taptap_icon_1794919853581.jpg';
 
@@ -187,12 +191,101 @@ const TUTORIAL_CONTENT: Record<TutorialNodeId, TutorialCinemaMeta> = {
   },
 };
 
+export function CompliancePolicyModal({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-black/85 backdrop-blur-sm p-0 sm:p-3"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="compliance-modal-title"
+      onClick={(e) => e.stopPropagation()}
+    >
+      <div className="w-full max-w-[490px] max-h-[90dvh] bg-[#151827] border border-[#38bdf8]/45 rounded-t-2xl sm:rounded-2xl shadow-2xl flex flex-col overflow-hidden pb-safe">
+        <div className="shrink-0 px-5 py-3.5 border-b border-[#2e3552] flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-[#38bdf8]" />
+            <h2
+              id="compliance-modal-title"
+              className="font-display text-base font-black text-[#f4f1ea]"
+            >
+              合规说明、隐私政策与适龄提示
+            </h2>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-[#94a3b8] hover:text-white hover:bg-white/10 cursor-pointer"
+            aria-label="关闭"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="flex-1 min-h-0 overflow-y-auto custom-scroll px-5 py-4 space-y-3.5 text-xs text-[#cbd5e1] leading-relaxed">
+          <section className="rounded-xl bg-[#101322] border border-[#fbbf24]/35 p-3.5 space-y-1.5">
+            <div className="font-display font-bold text-[#fde68a]">
+              一、适龄提示（12+）与《健康游戏忠告》
+            </div>
+            <p>
+              抵制不良游戏，拒绝盗版游戏。注意自我保护，谨防受骗上当。适度游戏益脑，沉迷游戏伤身。合理安排时间，享受健康生活。
+            </p>
+            <p className="text-[#94a3b8]">
+              本作品为幻想架空放置构筑单机游戏，建议年满 12 周岁及以上的用户使用。游戏内仅包含文字数值与奇幻战纹演绎，不含任何不良诱导或真实赌博内容。
+            </p>
+          </section>
+
+          <section className="rounded-xl bg-[#101322] border border-[#2e3552] p-3.5 space-y-1.5">
+            <div className="font-display font-bold text-[#7dd3fc]">
+              二、纯单机离线与隐私保护声明
+            </div>
+            <p>
+              《弑神道果：万亿亿劫》严格遵循最小必要原则：<span className="text-[#a7f3d0] font-semibold">不联网、无账号注册、无广告跟踪、不采集亦不上传任何个人身份信息、通讯录、定位、相册或设备隐私标识符</span>。
+            </p>
+            <p>
+              所有境界、护法、词缀、遗物与设置进度均仅保存于您当前浏览器的本地存储（localStorage）中。您可通过设置面板随时使用「复制存档串」或「下载 .json 备份文件」自行管理与迁移存档；清除浏览器缓存或执行「硬重置存档」将同步删除本地进度。
+            </p>
+          </section>
+
+          <section className="rounded-xl bg-[#101322] border border-[#2e3552] p-3.5 space-y-1.5">
+            <div className="font-display font-bold text-[#e2e8f0]">
+              三、版本与授权信息
+            </div>
+            <p>当前版本：v3.6.0（离线直玩 · 支持主屏幕安装）</p>
+            <p className="text-[#94a3b8]">
+              游戏内不存在真实货币充值与随机付费抽卡机制，所有词缀与遗物均通过局内玩法免费获取。
+            </p>
+          </section>
+        </div>
+
+        <div className="shrink-0 px-5 py-3 border-t border-[#2e3552] bg-[#111422] flex justify-end">
+          <button
+            type="button"
+            onClick={onClose}
+            className="min-h-[42px] px-5 py-2 rounded-lg text-xs font-bold bg-[#06b6d4]/25 border border-[#22d3ee]/60 text-[#ecfeff] hover:bg-[#06b6d4]/38 cursor-pointer"
+          >
+            我已阅读并了解
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function IntroModal() {
   const { meta, completeIntro } = useGameStore();
   const [step, setStep] = useState(0);
   const [skipStaggerForStep, setSkipStaggerForStep] = useState<number | null>(null);
   const [heroImgBroken, setHeroImgBroken] = useState(false);
   const [iconImgBroken, setIconImgBroken] = useState(false);
+  const [complianceOpen, setComplianceOpen] = useState(false);
 
   if (meta.hasSeenIntro) return null;
 
@@ -210,6 +303,7 @@ export function IntroModal() {
   };
 
   return (
+    <>
     <div
       className="fixed inset-0 z-50 flex flex-col justify-between bg-[#04050a] text-[#f1efe9] overflow-hidden animate-cinema-veil select-none"
       role="dialog"
@@ -378,17 +472,33 @@ export function IntroModal() {
             </button>
           )}
         </div>
+
+        <div className="w-full pt-1 flex items-center justify-between gap-2 flex-wrap text-[11px] text-[#64748b] border-t border-white/8">
+          <span>适龄提示 12+ · 抵制不良游戏，拒绝盗版游戏，适度游戏益脑</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setComplianceOpen(true);
+            }}
+            className="text-[#7dd3fc] hover:text-[#cffafe] underline underline-offset-2 cursor-pointer"
+          >
+            用户协议与隐私政策
+          </button>
+        </div>
       </footer>
     </div>
+    <CompliancePolicyModal open={complianceOpen} onClose={() => setComplianceOpen(false)} />
+    </>
   );
 }
 
 export function UnlockTutorialModal() {
-  const { activeTutorial, victorySummary, dismissTutorial } = useGameStore();
+  const { activeTutorial, victorySummary, offlineSummary, dismissTutorial } = useGameStore();
   const [instantNode, setInstantNode] = useState<TutorialNodeId | null>(null);
 
-  // Defer milestone cinema reveal until VictoryModal is dismissed so two full-screen overlays never stack
-  if (!activeTutorial || victorySummary) return null;
+  // Defer milestone cinema reveal until VictoryModal or OfflineReportModal is dismissed
+  if (!activeTutorial || victorySummary || offlineSummary) return null;
 
   const content = TUTORIAL_CONTENT[activeTutorial];
   const instant = instantNode === activeTutorial;
@@ -522,7 +632,7 @@ export function BuildGuideModal({ open, onClose }: { open: boolean; onClose: () 
               </h3>
             </div>
             <p className="text-xs text-[#cbd5e1] leading-[1.75]">
-              <RichLoreText text="给【青冥剑侍】洗出【万毒催熟】与【残影连击】/★【万剑归宗】，利用 0.4 秒超高频多段斩击疯狂引爆【深渊触母】叠加的永久腐蚀毒（触母本命推荐 ★【万毒之源】指数叠毒）！" />
+              <RichLoreText text="给【青冥剑侍】洗出【万毒催熟】与【残影连击】/★【万剑归宗】，利用高频多段斩击引爆【深渊触母】叠加的腐蚀毒（触母本命推荐 ★【万毒之源】，每击 +2% 毒层并最高延绵至 3500 层，搭配【腐化之眼】暴击毒潮）！" />
             </p>
           </div>
 
@@ -535,7 +645,7 @@ export function BuildGuideModal({ open, onClose }: { open: boolean; onClose: () 
               </h3>
             </div>
             <p className="text-xs text-[#cbd5e1] leading-[1.75]">
-              <RichLoreText text="【雷火机神】自带“剑侍与主角每攻 15 次缩减 1 秒冷却”，给【青冥剑侍】洗【雷火装填】、给机神洗【伴生剑意】与本命神通 ★【歼星连射】，让 5 秒重炮化为每秒轰炸的毁灭加特林！" />
+              <RichLoreText text="【雷火机神】自带“剑侍与主角每攻 15 次缩减 1 秒冷却”，给【青冥剑侍】洗【雷火装填】、给机神洗【重火协同】与本命神通 ★【歼星连射】，让重炮化为连射毁灭加特林，对第 6~10 重核心更享 ×3 倍穿透加成！" />
             </p>
           </div>
 
@@ -548,7 +658,19 @@ export function BuildGuideModal({ open, onClose }: { open: boolean; onClose: () 
               </h3>
             </div>
             <p className="text-xs text-[#cbd5e1] leading-[1.75]">
-              <RichLoreText text="【天机阵尊】与【混沌古神嗣】配合全员洗出【缩资减耗】与本命神通 ★【天道酬勤】，冲上 Lv.1000 激活全部 10 槽（每次里程碑伤害 ×2），触发 5 号位“每 100 总有效级复利 ×1.18”与 ★【千级共鸣】，稳步踏破终焉古神！" />
+              <RichLoreText text="【天机阵尊】与【混沌古神嗣】配合全员洗出【缩资减耗】与本命神通 ★【天道酬勤】，冲上 Lv.1000 激活全部 10 槽（每槽里程碑 ×2），触发 5 号位“每 100 总有效级复利 ×1.18”与 ★【千级共鸣】！" />
+            </p>
+          </div>
+
+          <div className="bg-[#101322] border border-[#a855f7]/35 rounded-lg p-3.5 space-y-2">
+            <div className="flex items-center gap-2">
+              <ArchetypeIcon archetype="merc_array" className="w-5 h-5" />
+              <h3 className="font-display text-sm font-black text-[#e9d5ff] tracking-wide">
+                4. 道海叩击流（主角反哺）
+              </h3>
+            </div>
+            <p className="text-xs text-[#cbd5e1] leading-[1.75]">
+              <RichLoreText text="主堆【强击】【道心共鸣】【借力打力】【护法反哺】，借助【古神道躯】每次突破全伤 ×10 与【机关傀儡】25次/秒超频，再通过遗物【悟道蒲团】【岁月史书】把主角巨额修为反哺全队！" />
             </p>
           </div>
         </div>
@@ -800,6 +922,133 @@ export function VictoryModal() {
             </button>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+export function OfflineReportModal() {
+  const { meta, settings, offlineSummary, clearOfflineSummary } = useGameStore();
+  if (!offlineSummary || !meta.hasSeenIntro) return null;
+
+  const crystalsTotal = toDecimal(offlineSummary.crystalsGained).add(
+    toDecimal(offlineSummary.overflowCrystals)
+  );
+  const stonesTotal = toDecimal(offlineSummary.stonesGained);
+
+  return (
+    <div
+      className="fixed inset-0 z-[54] flex items-end sm:items-center justify-center bg-[#04050c]/84 p-0 sm:p-3"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="offline-report-title"
+    >
+      <div className="w-full max-w-[460px] max-h-[90dvh] overflow-y-auto custom-scroll bg-[#151827] border border-[#22d3ee]/50 rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl space-y-3.5 pb-safe">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="inline-flex items-center gap-1.5 text-xs font-semibold tracking-wider text-[#22d3ee]">
+              <Clock className="w-4 h-4" />
+              <span>
+                {offlineSummary.mode === 'auto_repeat'
+                  ? '离线闭关 · 自动连刷扫荡'
+                  : '离线闭关 · 挂机推进'}
+              </span>
+            </div>
+            <h2
+              id="offline-report-title"
+              className="font-display text-lg font-black tracking-wide text-[#f4f1ea] mt-1"
+            >
+              {offlineSummary.tribulationName}
+            </h2>
+            <p className="text-xs font-mono-num text-[#94a3b8] mt-0.5">
+              离开 {formatCareerDuration(offlineSummary.elapsedOfflineMs)} · 计入{' '}
+              {formatCareerDuration(offlineSummary.cappedMs)}（上限 12h · 55% 效率）
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={clearOfflineSummary}
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-[#94a3b8] hover:text-white hover:bg-white/10 cursor-pointer shrink-0"
+            aria-label="关闭离线收益结算"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="grid grid-cols-2 gap-2.5 bg-[#101322] border border-[#2e3552] rounded-xl p-3.5 text-xs">
+          {offlineSummary.mode === 'auto_repeat' ? (
+            <div>
+              <span className="text-[#94a3b8] block">离线扫荡通关</span>
+              <span className="font-mono-num text-base font-extrabold text-[#34d399]">
+                +{offlineSummary.clearsGained} 轮
+              </span>
+            </div>
+          ) : (
+            <div>
+              <span className="text-[#94a3b8] block">离线破壳进度</span>
+              <span className="font-mono-num text-base font-extrabold text-[#34d399]">
+                破 {offlineSummary.shellsBroken} 重
+                {offlineSummary.clearsGained > 0 ? ' (已通关)' : ''}
+              </span>
+            </div>
+          )}
+          <div>
+            <span className="text-[#94a3b8] block">收获神晶</span>
+            <span className="font-mono-num text-base font-extrabold text-[#c084fc]">
+              +{formatNumber(crystalsTotal, settings.numberMode)}
+            </span>
+          </div>
+          <div>
+            <span className="text-[#94a3b8] block">收获词缀石</span>
+            <span className="font-mono-num text-sm font-bold text-[#fbbf24]">
+              +{offlineSummary.affixStonesGained.toLocaleString('en-US')}
+            </span>
+          </div>
+          <div>
+            <span className="text-[#94a3b8] block">收获灵石</span>
+            <span className="font-mono-num text-sm font-bold text-[#67e8f9]">
+              +{formatNumber(stonesTotal, settings.numberMode)}
+            </span>
+          </div>
+        </div>
+
+        {offlineSummary.unlockedNextOrder !== null && (
+          <div className="rounded-xl bg-[#10b981]/14 border border-[#34d399]/45 px-3.5 py-2.5 text-xs font-bold text-[#6ee7b7]">
+            破禁飞升：离线累计达标，已解锁【劫数 {offlineSummary.unlockedNextOrder}】挑战权限！
+          </div>
+        )}
+
+        {offlineSummary.relicDrops.length > 0 && (
+          <div className="space-y-1.5 bg-[#101322] border border-[#2e3552] rounded-xl p-3 max-h-48 overflow-y-auto custom-scroll">
+            <div className="text-xs font-semibold text-[#94a3b8]">
+              离线劫印遗物收获（共 {offlineSummary.relicDrops.length} 种）：
+            </div>
+            {offlineSummary.relicDrops.map((d) => {
+              const tMeta = RELIC_TIER_META[d.tier];
+              return (
+                <div
+                  key={d.relicId}
+                  className={`flex items-center justify-between gap-2 px-2.5 py-1.5 rounded-lg border text-xs ${tMeta.borderClass} ${tMeta.badgeBgClass}`}
+                >
+                  <span className={`truncate ${tMeta.fontClass}`}>
+                    [{tMeta.label}] {d.name}
+                  </span>
+                  <span className="font-mono-num text-[#f8fafc] shrink-0">
+                    +{d.levelsAdded} 劫印 (总Lv.{d.totalLevel})
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={clearOfflineSummary}
+          className="w-full min-h-[46px] px-4 py-2.5 rounded-xl text-sm font-display font-bold tracking-wider bg-[#06b6d4]/25 border border-[#22d3ee]/65 text-[#ecfeff] hover:bg-[#06b6d4]/38 transition-colors cursor-pointer"
+        >
+          收下闭关硕果 · 继续弑神
+        </button>
       </div>
     </div>
   );
@@ -1141,7 +1390,9 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   const [importError, setImportError] = useState<string | null>(null);
   const [showHardReset, setShowHardReset] = useState(false);
   const [showStats, setShowStats] = useState(false);
+  const [showCompliance, setShowCompliance] = useState(false);
   const [nowTick, setNowTick] = useState(() => Date.now());
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -1173,6 +1424,62 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
         });
     } else {
       setExportNotice('已生成存档串，请手动全选文本框复制');
+    }
+  };
+
+  const handleDownloadJsonBackup = () => {
+    setImportError(null);
+    const payload = exportSaveString();
+    setSaveText(payload);
+    try {
+      const backupObj = {
+        game: '弑神道果：万亿亿劫',
+        version: '3.6.0',
+        exportedAt: new Date().toISOString(),
+        payload,
+      };
+      const blob = new Blob([JSON.stringify(backupObj, null, 2)], {
+        type: 'application/json;charset=utf-8',
+      });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      const stamp = new Date().toISOString().slice(0, 10);
+      link.href = url;
+      link.download = `shishen-daoguo-save-${stamp}.json`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setExportNotice('已下载本地 .json 存档备份文件');
+    } catch {
+      setExportNotice('下载触发失败，已生成 Base64 存档串供复制');
+    }
+  };
+
+  const handleFileImportChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImportError(null);
+    setExportNotice(null);
+    try {
+      const rawText = (await file.text()).trim();
+      let candidate = rawText;
+      if (rawText.startsWith('{')) {
+        const parsed = JSON.parse(rawText) as { payload?: unknown };
+        if (typeof parsed.payload === 'string' && parsed.payload.trim()) {
+          candidate = parsed.payload.trim();
+        }
+      }
+      setSaveText(candidate);
+      const res = importSaveString(candidate);
+      if (!res.ok) {
+        setImportError(res.error ?? '存档文件导入失败');
+      } else {
+        onClose();
+      }
+    } catch {
+      setImportError('读取备份文件失败，请确认为有效 .json 或 Base64 文本');
     }
   };
 
@@ -1393,29 +1700,58 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               </button>
             </div>
 
-            {/* Base64 Export / Import */}
+            {/* PWA Offline / Home Screen Install Entry */}
+            <PWAInstallButton />
+
+            {/* Base64 & File Export / Import */}
             <div className="space-y-2.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-[13px] font-semibold text-[#f4f1ea]">Base64 存档导入/导出</span>
-                <div className="flex items-center gap-2">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="text-[13px] font-semibold text-[#f4f1ea]">存档备份导入 / 导出</span>
+                <div className="flex items-center gap-1.5 flex-wrap">
                   <button
                     type="button"
                     onClick={handleExport}
-                    className="min-h-[40px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#06b6d4]/22 border border-[#22d3ee]/50 text-[#cffafe] hover:bg-[#06b6d4]/35 cursor-pointer"
+                    className="min-h-[38px] inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-[#06b6d4]/22 border border-[#22d3ee]/50 text-[#cffafe] hover:bg-[#06b6d4]/35 cursor-pointer"
                   >
                     {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copied ? '已复制' : '导出'}</span>
+                    <span>{copied ? '已复制' : '复制串'}</span>
                   </button>
                   <button
                     type="button"
                     onClick={handleImport}
                     disabled={!saveText.trim()}
-                    className="min-h-[40px] inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#10b981]/22 border border-[#34d399]/50 text-[#a7f3d0] hover:bg-[#10b981]/35 disabled:opacity-40 cursor-pointer"
+                    className="min-h-[38px] inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-bold bg-[#10b981]/22 border border-[#34d399]/50 text-[#a7f3d0] hover:bg-[#10b981]/35 disabled:opacity-40 cursor-pointer"
                   >
                     <Upload className="w-3.5 h-3.5" />
-                    <span>导入</span>
+                    <span>文本导入</span>
                   </button>
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={handleDownloadJsonBackup}
+                  className="min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#181d31] border border-[#384166] text-[#cbd5e1] hover:text-white hover:border-[#38bdf8]/50 cursor-pointer"
+                >
+                  <Download className="w-3.5 h-3.5 text-[#38bdf8]" />
+                  <span>下载备份 (.json)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className="min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#181d31] border border-[#384166] text-[#cbd5e1] hover:text-white hover:border-[#34d399]/50 cursor-pointer"
+                >
+                  <FileUp className="w-3.5 h-3.5 text-[#34d399]" />
+                  <span>导入备份文件</span>
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".json,.txt,application/json,text/plain"
+                  onChange={handleFileImportChange}
+                  className="hidden"
+                />
               </div>
 
               <textarea
@@ -1431,6 +1767,25 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               />
               {exportNotice && <p className="text-xs text-[#6ee7b7]">{exportNotice}</p>}
               {importError && <p className="text-xs text-[#fda4af]">{importError}</p>}
+            </div>
+
+            {/* Domestic Compliance & Version Info */}
+            <div className="rounded-xl bg-[#101322] border border-[#2e3552] px-3.5 py-2.5 flex items-center justify-between gap-2 flex-wrap text-xs">
+              <div className="text-[#94a3b8]">
+                <span className="font-mono-num text-[#cbd5e1] font-semibold">v3.6.0</span>
+                <span className="mx-1.5">·</span>
+                <span>适龄 12+</span>
+                <span className="mx-1.5">·</span>
+                <span>纯单机不收集隐私</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowCompliance(true)}
+                className="inline-flex items-center gap-1 text-[#7dd3fc] hover:text-[#cffafe] font-semibold cursor-pointer"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>协议与忠告</span>
+              </button>
             </div>
           </div>
 
@@ -1462,6 +1817,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
       </div>
 
       <StatsModal open={showStats} onClose={() => setShowStats(false)} />
+      <CompliancePolicyModal open={showCompliance} onClose={() => setShowCompliance(false)} />
       <HardResetConfirmModal
         open={showHardReset}
         onClose={() => setShowHardReset(false)}
@@ -1648,46 +2004,10 @@ function computeDpsSnapshot(
   run: RunState,
   meta: MetaState
 ): { slotDps: Decimal; teamDps: Decimal } {
-  const heroStats = getHeroStats(run, targetMercs, meta);
-  const globalMult = getGlobalMult(run, targetMercs, meta);
-  const cloneRateNow =
-    run.skills.sk_clone.activeRemaining > 0
-      ? getSkillEffectiveValues('sk_clone', run.skills.sk_clone.level, targetMercs, meta)
-          .effectValue
-      : 0;
-  const heroEstDps = heroStats.expectedHeroClick.mul(
-    heroStats.puppetRate * heroStats.puppetOverflowMult + cloneRateNow
-  );
-  const poisonEstDps = getPoisonTickExpectedDamage(
-    targetMercs,
-    run,
-    meta,
-    heroStats.heroBasePower,
-    heroStats.rawHeroClick,
-    globalMult
-  ).expectedPoison;
-
-  let slotDps = new Decimal(0);
-  let teamMercsDps = new Decimal(0);
-  for (let i = 0; i < targetMercs.length; i++) {
-    const m = targetMercs[i];
-    if (!m?.unlocked || m.level <= 0) continue;
-    const est = getMercenaryComputedStats(
-      i,
-      targetMercs,
-      run,
-      meta,
-      heroStats.heroBasePower,
-      heroStats.rawHeroClick,
-      globalMult
-    ).dpsEstimate;
-    teamMercsDps = teamMercsDps.add(est);
-    if (i === slotIndex) slotDps = est;
-  }
-
+  const bd = getTeamCombatDpsBreakdown(run, targetMercs, meta, { samplePoisonIfZero: 150 });
   return {
-    slotDps,
-    teamDps: heroEstDps.add(poisonEstDps).add(teamMercsDps),
+    slotDps: bd.mercDpsList[slotIndex] ?? new Decimal(0),
+    teamDps: bd.totalDps,
   };
 }
 
