@@ -4,6 +4,8 @@ import {
   AFFIXES,
   AFFIX_TIER_META,
   INNATE_AFFIXES,
+  getNextAffixTier,
+  getQuenchCost,
   rollAffixTier,
   rollRandomAffixId,
   rollRandomInnateAffix,
@@ -11,12 +13,19 @@ import {
 import { ARCHETYPES } from '../config/archetypes';
 import { BOSS_SHELLS, TRIBULATION_MAP, TRIBULATIONS } from '../config/bosses';
 import {
+  AD_STONE_BOOST_DURATION_MS,
+  AD_STONE_BOOST_MULT,
   BASE_START_MANA,
+  CANNON_CHARGE_SEC_PER_15_ATTACKS,
   ENLIGHTENMENT_BASE_COST,
+  JACKPOT_OVERFLOW_RATE,
   ENLIGHTENMENT_COST_GROWTH,
   FLOATING_TEXT_MIN_INTERVAL_MS,
   LEVEL_SLOT_THRESHOLDS,
   MAX_ATTACKS_PER_SEC,
+  MAX_CANNON_CHARGE_SEC_PER_SEC,
+  MAX_DAILY_AD_STONE_BOOSTS,
+  MAX_JACKPOT_PROCS_PER_SEC,
   MAX_ONSCREEN_FLOATING_TEXTS,
   MAX_ONSCREEN_RIPPLES,
   MERC_SLOT_CRYSTAL_COSTS,
@@ -38,6 +47,7 @@ import {
 } from '../config/relics';
 import {
   evaluateSpeedrunRank,
+  getBatchRerollCost,
   getCostReductionMult,
   getEffectiveGrowthRate,
   getGlobalMult,
@@ -51,21 +61,36 @@ import {
   getRealmInfo,
   getRelicCrystalBonusMult,
   getRelicTotalLv,
+  getShellStoneExpectation,
+  getSingleRerollCost,
   getSkillEffectiveValues,
   getSpiritStoneMultiplier,
   getTeamCombatDpsBreakdown,
   getTribulationConfig,
   isSlot5Active,
-  sumAllActiveAffixRatio,
+  rollStoneDrops,
+  rollTribulationStoneDrops,
   sumMercActiveAffixRatio,
 } from '../core/damageCalc';
 import { calculateBulkUpgrade, formatNumber, toDecimal } from '../core/formatNumber';
+import {
+  cloudSaveAvailable,
+  cloudUploadCooldownRemaining,
+  getLastCloudUploadAt,
+  ensureTapLogin,
+  flushCloudSave,
+  loadCloudSave,
+  scheduleCloudSave,
+  subscribeAppLifecycle,
+} from '../platform/tap';
+import { track } from '../platform/telemetry';
 import type {
   AffixInstance,
   ArchetypeId,
   AutoUpgradeSettings,
   BuyMode,
   ClickRipple,
+  CloudRestoreResult,
   FloatingDamageText,
   FloatingTextMode,
   GameSaveData,
@@ -90,6 +115,15 @@ import { soundEngine } from '../utils/audio';
 
 const STORAGE_KEY = 'shishen_daoguo_v35_save';
 const TICK_MS = 50; // 20Hz logic tick
+const UI_SYNC_MS = 100; // UI 10Hz，逻辑仍为 20Hz
+const DAILY_CHEST_CRYSTALS = 3;
+const DAILY_CHEST_AFFIX_STONES = 5;
+const MAX_DAILY_AD_REROLLS = 3;
+
+function getTodayKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+}
 
 const FIXED_SLOT_ARCHETYPES: ArchetypeId[] = [
   'merc_sword',
@@ -115,6 +149,19 @@ function decodeBase64Utf8(b64: string): string {
     bytes[i] = bin.charCodeAt(i);
   }
   return new TextDecoder().decode(bytes);
+}
+
+/** 读取存档（Base64 或原始 JSON）的保存时间戳；解析失败返回 0（不阻断恢复） */
+function peekSaveTimestamp(raw: string): number {
+  try {
+    const json = raw.trim().startsWith('{') ? raw : decodeBase64Utf8(raw);
+    const parsed = JSON.parse(json) as { savedAt?: unknown };
+    return typeof parsed.savedAt === 'number' && Number.isFinite(parsed.savedAt)
+      ? parsed.savedAt
+      : 0;
+  } catch {
+    return 0;
+  }
 }
 
 export function createInitialMetaState(): MetaState {
@@ -175,6 +222,14 @@ export function createInitialMetaState(): MetaState {
     totalClicks: '0',
     highestDps: '0',
     totalRerolls: 0,
+    lastDailyChestDay: '',
+    lastAdRerollDay: '',
+    adRerollsToday: 0,
+    adFreeRerollTokens: 0,
+    adStoneBoostUntil: 0,
+    adStoneBoostMult: 1,
+    lastAdStoneBoostDay: '',
+    adStoneBoostsToday: 0,
   };
 }
 
@@ -285,6 +340,7 @@ export function createInitialRunState(
       hero: '0',
       poison: '0',
       mercs: ['0', '0', '0', '0', '0'],
+      bonus: '0',
     },
   };
 }
@@ -429,6 +485,15 @@ function sanitizeMetaState(raw: Partial<MetaState> | undefined, defaultMeta: Met
     totalClicks: safeDecimalStr(src.totalClicks, '0'),
     highestDps: safeDecimalStr(src.highestDps, '0'),
     totalRerolls: safeInt(src.totalRerolls, 0, 0),
+    lastDailyChestDay: typeof src.lastDailyChestDay === 'string' ? src.lastDailyChestDay : '',
+    lastAdRerollDay: typeof src.lastAdRerollDay === 'string' ? src.lastAdRerollDay : '',
+    adRerollsToday: safeInt(src.adRerollsToday, 0, 0, MAX_DAILY_AD_REROLLS),
+    adFreeRerollTokens: safeInt(src.adFreeRerollTokens, 0, 0, MAX_DAILY_AD_REROLLS),
+    adStoneBoostUntil: safeFloat(src.adStoneBoostUntil, 0, 0),
+    adStoneBoostMult: safeFloat(src.adStoneBoostMult, 1, 1, 5),
+    lastAdStoneBoostDay:
+      typeof src.lastAdStoneBoostDay === 'string' ? src.lastAdStoneBoostDay : '',
+    adStoneBoostsToday: safeInt(src.adStoneBoostsToday, 0, 0, MAX_DAILY_AD_STONE_BOOSTS),
   };
 }
 
@@ -860,13 +925,15 @@ function settleOfflineProgress(
       let crystalsEarnedTotal = new Decimal(0);
       let overflowCrystalsTotal = new Decimal(0);
       let unlockedNextOrder: number | null = null;
-      const affixStonesEarned = sweeps * 40;
+      // 词缀石：按当前劫数的「每重期望」逐次结算，与在线破壳同口径（不再硬编码 40/次）
+      let affixStonesEarned = 0;
+
+      // 离线扫荡冻结境界：真神轮回（NG+）必须在线亲自讨伐，避免离线无限刷层。
+      const startNgPlus = nextMeta.ngPlusCount;
 
       for (let s = 0; s < sweeps; s++) {
         const ngMult =
-          trib.id === 'tier_10' && nextMeta.ngPlusCount > 0
-            ? Decimal.pow(2, nextMeta.ngPlusCount)
-            : new Decimal(1);
+          trib.id === 'tier_10' && startNgPlus > 0 ? Decimal.pow(2, startNgPlus) : new Decimal(1);
         const crystalBonusMult = getRelicCrystalBonusMult(nextMeta);
         const sweepCrystals = new Decimal(trib.baseCrystalReward)
           .mul(ngMult)
@@ -875,6 +942,7 @@ function settleOfflineProgress(
           .floor();
         crystalsEarnedTotal = crystalsEarnedTotal.add(sweepCrystals);
         nextMeta.totalSlays += 1;
+        affixStonesEarned += rollTribulationStoneDrops(trib.id, nextMeta, mercs);
         nextMeta.clearCounts[trib.id] = (nextMeta.clearCounts[trib.id] ?? 0) + 1;
 
         const crownLv = getRelicTotalLv(nextMeta, 'rel_e_rarity_crown');
@@ -884,7 +952,7 @@ function settleOfflineProgress(
           trib.relicDropCount +
           speedBonusDrops +
           crownExtraDrop +
-          (trib.id === 'tier_10' ? Math.min(3, Number(nextMeta.ngPlusCount) || 0) : 0);
+          (trib.id === 'tier_10' ? Math.min(3, startNgPlus) : 0);
 
         for (let d = 0; d < dropRolls; d++) {
           overflowCrystalsTotal = overflowCrystalsTotal.add(rollRelicDrop());
@@ -895,9 +963,6 @@ function settleOfflineProgress(
           if (!check.nextTrib || !check.canUnlock) break;
           nextMeta.highestUnlockedOrder = check.nextTrib.order;
           unlockedNextOrder = check.nextTrib.order;
-        }
-        if (trib.id === 'tier_10') {
-          nextMeta.ngPlusCount += 1;
         }
       }
 
@@ -941,7 +1006,8 @@ function settleOfflineProgress(
 
   const savedDps = toDecimal(run.recentTickDps.hero)
     .add(toDecimal(run.recentTickDps.poison))
-    .add(run.recentTickDps.mercs.reduce((a, v) => a.add(toDecimal(v)), new Decimal(0)));
+    .add(run.recentTickDps.mercs.reduce((a, v) => a.add(toDecimal(v)), new Decimal(0)))
+    .add(toDecimal(run.recentTickDps.bonus ?? '0'));
 
   const initialBreakdown = getTeamCombatDpsBreakdown(nextRun, nextMercs, nextMeta, { nowMs });
   const initialEffDps = Decimal.max(initialBreakdown.totalDps, savedDps).mul(OFFLINE_EFFICIENCY);
@@ -1006,7 +1072,8 @@ function settleOfflineProgress(
     const sMult = getSpiritStoneMultiplier(
       nextMercs,
       { ...nextRun, phaseIndex: phase },
-      nextMeta
+      nextMeta,
+      false
     );
     const phaseStones = dealt.mul(sMult);
     stonesGained = stonesGained.add(phaseStones);
@@ -1015,7 +1082,7 @@ function settleOfflineProgress(
     if (timeToBreak <= remSec) {
       remSec -= Math.max(0.01, timeToBreak);
       shellsBroken += 1;
-      affixStonesGained += BOSS_SHELLS[phase].baseAffixStones;
+      affixStonesGained += rollStoneDrops(getShellStoneExpectation(trib.id, phase, nextMeta, nextMercs));
       const pNum = phase + 1;
       if (nextMeta.firstBreakGiftsClaimed < pNum) {
         nextMeta.firstBreakGiftsClaimed = pNum;
@@ -1170,6 +1237,7 @@ function settleOfflineProgress(
         string,
         string,
       ],
+      bonus: endBreakdown.clickLinkDps.add(endBreakdown.cannonChargeDps).toString(),
     };
   }
 
@@ -1334,6 +1402,7 @@ function loadSavedState(): {
                 string,
               ])
             : baseRun.recentTickDps.mercs,
+        bonus: safeDecimalStr(parsed.run?.recentTickDps?.bonus, '0'),
       },
     };
 
@@ -1385,6 +1454,21 @@ interface GameContextValue {
   activeTutorial: TutorialNodeId | null;
   clearVictorySummary: () => void;
   clearOfflineSummary: () => void;
+  offlineAdBonusClaimed: boolean;
+  claimOfflineAdBonus: () => boolean;
+  claimDailyChest: () => boolean;
+  canClaimDailyChest: boolean;
+  claimAdRerollToken: () => boolean;
+  canClaimAdRerollToken: boolean;
+  claimAdStoneBoost: () => boolean;
+  canClaimAdStoneBoost: boolean;
+  adStoneBoostActive: boolean;
+  adStoneBoostRemainingMs: number;
+  adStoneBoostsLeftToday: number;
+  cloudAvailable: boolean;
+  lastCloudSavedAt: number | null;
+  syncCloudNow: () => Promise<boolean>;
+  restoreFromCloud: (force?: boolean) => Promise<CloudRestoreResult>;
   openLastClearReportModal: () => void;
   quickRestartAfterSilentClear: () => void;
   completeIntro: () => void;
@@ -1404,6 +1488,7 @@ interface GameContextValue {
   toggleAffixLock: (slotIndex: number, affixIdx: number) => void;
   rerollMercSingleSlot: (slotIndex: number, affixIdx: number) => void;
   rerollMercBatchSlots: (slotIndex: number) => void;
+  quenchMercAffix: (slotIndex: number, affixIdx: number) => void;
   confirmPendingLevelAffixes: (slotIndex: number, accept: boolean) => void;
   rerollMercInnate: (slotIndex: number) => void;
   confirmPendingInnateAffix: (slotIndex: number, accept: boolean) => void;
@@ -1458,6 +1543,9 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const [offlineSummary, setOfflineSummary] = useState<OfflineSummary | null>(
     () => initialRef.current?.offlineSummary ?? null
   );
+  const [offlineAdBonusClaimed, setOfflineAdBonusClaimed] = useState(false);
+  const offlineAdBonusKeyRef = useRef<string | null>(null);
+  const [lastCloudSavedAt, setLastCloudSavedAt] = useState<number | null>(null);
   const [lastClearReport, setLastClearReport] = useState<SilentClearReport | null>(null);
   const [autoRepeatCountdown, setAutoRepeatCountdown] = useState<number | null>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -1478,8 +1566,17 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   const puppetAccRef = useRef(0);
   const cloneAccRef = useRef(0);
+  // 机神充能令牌桶：容量/回充均为 1.0 秒冷却/秒，保证充能最多让机神攻速翻倍
+  const cannonChargeBucketRef = useRef({ tokens: MAX_CANNON_CHARGE_SEC_PER_SEC, at: Date.now() });
+  // 天降横财令牌桶：5 次/秒全额 + 5 次/秒按 20% 折算，超出丢弃
+  const jackpotProcBucketRef = useRef({
+    primary: MAX_JACKPOT_PROCS_PER_SEC,
+    overflow: MAX_JACKPOT_PROCS_PER_SEC,
+    at: Date.now(),
+  });
   const poisonTickAccRef = useRef(0);
   const autoBuyAccRef = useRef(0);
+  const uiSyncAccRef = useRef(0);
   const floatIdRef = useRef(1);
   const rippleIdRef = useRef(1);
   const lastFloatSpawnRef = useRef(0);
@@ -1609,7 +1706,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         meta: metaRef.current,
         settings: settingsRef.current,
       };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      const json = JSON.stringify(payload);
+      localStorage.setItem(STORAGE_KEY, json);
+      if (cloudSaveAvailable()) {
+        scheduleCloudSave(encodeBase64Utf8(json));
+      }
       setLastSavedAt(savedAt);
     } catch {
       // Ignore storage quota errors
@@ -1618,6 +1719,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
   const saveNow = useCallback(() => {
     saveToLocalStorage();
+    void flushCloudSave();
     showToast('已立即保存当前全部修为与设置');
   }, [saveToLocalStorage, showToast]);
 
@@ -1637,7 +1739,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       let shellsBroken = 0;
       let hp = toDecimal(nextRun.bossHp);
       let phase = nextRun.phaseIndex;
-      const firstAffixRelicLv = getRelicTotalLv(nextMeta, 'rel_m_first_affix');
 
       let lastBrokenPhaseNumber = 0;
       let totalStonesEarnedInBreak = 0;
@@ -1653,20 +1754,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         if (hp.lte(0)) {
           shellsBroken++;
           const brokenPhaseNumber = phase + 1;
-          const shellCfg = BOSS_SHELLS[phase];
 
-          // Base Affix Stones + overflow guaranteed bonus from af_t2_stone_p + rel_r_essence
-          const essenceRelicLv = getRelicTotalLv(nextMeta, 'rel_r_essence');
-          const stoneAffixRatio = sumAllActiveAffixRatio(
-            nextMercs,
-            'af_t2_stone_p',
-            firstAffixRelicLv
+          // 词缀石：按【劫数 × 躯壳深度】的期望掉落，整数必掉 + 小数概率补 1 颗。
+          // 遗物/词缀加成为封顶乘法（贪婪触须 ≤+150%、寻宝天眼全队 ≤+100%）。
+          const tribCfg = getTribulationConfig(nextRun.tribulationId);
+          let stonesGain = rollStoneDrops(
+            getShellStoneExpectation(tribCfg.id, phase, nextMeta, nextMercs)
           );
-          const extraPct = essenceRelicLv * 4 + stoneAffixRatio * 100;
-          let stonesGain =
-            shellCfg.baseAffixStones +
-            Math.floor(extraPct / 100) +
-            (Math.random() < (extraPct % 100) / 100 ? 1 : 0);
 
           // rel_e_boss_skip (Phase 1~8)
           const skipLv = getRelicTotalLv(nextMeta, 'rel_e_boss_skip');
@@ -1741,7 +1835,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
                     (acc, v) => acc.add(toDecimal(v)),
                     new Decimal(0)
                   )
-                );
+                )
+                .add(toDecimal(nextRun.recentTickDps.bonus ?? '0'));
               if (curTeamDps.gt(0)) {
                 remaining = remaining.add(curTeamDps.mul(0.2 * shellBurstLv));
               }
@@ -1793,6 +1888,36 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   );
 
   // Trigger Slot 2 Talent 2: any ally crit pops 30% of full poison damage
+  const consumeCannonCharge = useCallback((seconds: number): number => {
+    if (seconds <= 0) return 0;
+    const bucket = cannonChargeBucketRef.current;
+    const now = Date.now();
+    const elapsed = Math.max(0, Math.min(5, (now - bucket.at) / 1000));
+    bucket.at = now;
+    bucket.tokens = Math.min(MAX_CANNON_CHARGE_SEC_PER_SEC, bucket.tokens + elapsed);
+    const granted = Math.min(seconds, bucket.tokens);
+    bucket.tokens -= granted;
+    return granted;
+  }, []);
+
+  const consumeJackpotProc = useCallback((): number => {
+    const bucket = jackpotProcBucketRef.current;
+    const now = Date.now();
+    const elapsed = Math.max(0, Math.min(5, (now - bucket.at) / 1000));
+    bucket.at = now;
+    bucket.primary = Math.min(MAX_JACKPOT_PROCS_PER_SEC, bucket.primary + elapsed);
+    bucket.overflow = Math.min(MAX_JACKPOT_PROCS_PER_SEC, bucket.overflow + elapsed);
+    if (bucket.primary >= 1) {
+      bucket.primary -= 1;
+      return 1;
+    }
+    if (bucket.overflow >= 1) {
+      bucket.overflow -= 1;
+      return JACKPOT_OVERFLOW_RATE;
+    }
+    return 0;
+  }, []);
+
   const triggerCritPoisonBurst = useCallback(
     (nextRun: RunState, nextMercs: MercenarySlotState[], nextMeta: MetaState) => {
       if (
@@ -2080,6 +2205,13 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         nextUnlockProgress,
       };
 
+      track('tribulation_clear', {
+        tribulationId: trib.id,
+        rank,
+        clearTimeMs,
+        autoRepeat: Boolean(m.autoRepeatEnabled && m.sssUnlockedAutoRepeat[trib.id]),
+      });
+
       const isAutoLoop = m.autoRepeatEnabled && Boolean(m.sssUnlockedAutoRepeat[trib.id]);
       const isFirstMilestone = Boolean(firstClearNote || unlockedSssAutoRepeat);
 
@@ -2248,8 +2380,58 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         .add(toDecimal(nextRun.recentTickDps.poison))
         .add(
           nextRun.recentTickDps.mercs.reduce((acc, v) => acc.add(toDecimal(v)), new Decimal(0))
-        );
+        )
+        .add(toDecimal(nextRun.recentTickDps.bonus ?? '0'));
 
+      // ===== 每次【攻击】触发一次的效果（v3.9：从命中循环移出，避免被 5~9 段命中放大）=====
+      // 剑侍/主角每 15 次攻击为机神充能；与雷火装填共享 1.0 秒/秒的充能上限
+      if (slotIdx === 0 && nextMercs[2]?.unlocked && nextMercs[2].level > 0) {
+        nextRun.swordAndHeroAttacksForCannon += 1;
+        if (nextRun.swordAndHeroAttacksForCannon >= 15) {
+          const steps = Math.floor(nextRun.swordAndHeroAttacksForCannon / 15);
+          nextRun.swordAndHeroAttacksForCannon %= 15;
+          nextMercs[2].attackTimer += consumeCannonCharge(
+            steps * CANNON_CHARGE_SEC_PER_15_ATTACKS
+          );
+        }
+      }
+
+      // af_t3_cd_can：其他护法的每次攻击为机神装填；机神自身不自我装填，防止无限加速
+      if (
+        st.cdReduceCanSec > 0 &&
+        slotIdx !== 2 &&
+        nextMercs[2]?.unlocked &&
+        nextMercs[2].level > 0
+      ) {
+        nextMercs[2].attackTimer += consumeCannonCharge(st.cdReduceCanSec);
+      }
+
+      // af_t3_buff_h (FIFO 25 stacks, 5s)
+      if (st.heroBuffOnHit > 0) {
+        const nextBuffs = [
+          ...nextRun.heroBuffStacks.filter((b) => b.expiresAt > nowMs),
+          { val: st.heroBuffOnHit, expiresAt: nowMs + 5000 },
+        ];
+        nextRun.heroBuffStacks =
+          nextBuffs.length > 25 ? nextBuffs.slice(nextBuffs.length - 25) : nextBuffs;
+      }
+
+      // af_t2_mana_h
+      if (st.manaOnHitChance > 0 && Math.random() < st.manaOnHitChance) {
+        nextRun.mana = Math.min(heroStats.manaCap, nextRun.mana + 2);
+      }
+
+      // af_t2_jackpot：每秒最多 5 次全额 + 5 次 20% 折算，超出丢弃
+      if (st.jackpotChance > 0 && currentTotalDps.gt(0) && Math.random() < st.jackpotChance) {
+        const procValue = consumeJackpotProc();
+        if (procValue > 0) {
+          nextRun.spiritStones = toDecimal(nextRun.spiritStones)
+            .add(currentTotalDps.mul(2.0).mul(procValue))
+            .toString();
+        }
+      }
+
+      // ===== 每次【命中】结算的伤害/暴击特效 =====
       for (let h = 0; h < totalHits; h++) {
         if (nextRun.runCompleted) break;
 
@@ -2268,37 +2450,12 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
-        // Slot 1 attack charges Slot 3 cannon (15 attacks -> -1.0s CD)
-        if (slotIdx === 0 && nextMercs[2]?.unlocked && nextMercs[2].level > 0) {
-          nextRun.swordAndHeroAttacksForCannon += 1;
-          if (nextRun.swordAndHeroAttacksForCannon >= 15) {
-            const steps = Math.floor(nextRun.swordAndHeroAttacksForCannon / 15);
-            nextRun.swordAndHeroAttacksForCannon %= 15;
-            nextMercs[2].attackTimer += steps * 1.0;
-          }
-        }
-
-        // Any ally crit triggers Slot 2 Talent 2 (毒爆共鸣)
+        // Any ally crit triggers Slot 2 Talent 2 (毒爆共鸣) — 文案本就按“命中”结算
         if (isCrit) {
           totalDealt = totalDealt.add(triggerCritPoisonBurst(nextRun, nextMercs, nextMeta));
         }
 
-        // af_t3_buff_h (FIFO 25 stacks, 5s)
-        if (st.heroBuffOnHit > 0) {
-          const nextBuffs = [
-            ...nextRun.heroBuffStacks.filter((b) => b.expiresAt > nowMs),
-            { val: st.heroBuffOnHit, expiresAt: nowMs + 5000 },
-          ];
-          nextRun.heroBuffStacks =
-            nextBuffs.length > 25 ? nextBuffs.slice(nextBuffs.length - 25) : nextBuffs;
-        }
-
-        // af_t3_cd_can (advance cannon timer)
-        if (st.cdReduceCanSec > 0 && nextMercs[2]?.unlocked && nextMercs[2].level > 0) {
-          nextMercs[2].attackTimer += st.cdReduceCanSec;
-        }
-
-        // af_t3_pop_dot (trigger full poison tick)
+        // af_t3_pop_dot (每命中触发全额毒伤) — 保留按命中结算
         if (
           st.poisonPopChance > 0 &&
           nextRun.poisonStacks > 0 &&
@@ -2319,22 +2476,6 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
             totalDealt = totalDealt.add(pRes.actualDealt);
           }
         }
-
-        // af_t2_mana_h
-        if (st.manaOnHitChance > 0 && Math.random() < st.manaOnHitChance) {
-          nextRun.mana = Math.min(heroStats.manaCap, nextRun.mana + 2);
-        }
-
-        // af_t2_jackpot
-        if (
-          st.jackpotChance > 0 &&
-          currentTotalDps.gt(0) &&
-          Math.random() < st.jackpotChance
-        ) {
-          nextRun.spiritStones = toDecimal(nextRun.spiritStones)
-            .add(currentTotalDps.mul(2.0))
-            .toString();
-        }
       }
 
       // sp_skill_trig (every 30 attacks triggers free Thunder Strike Lv.>=1)
@@ -2346,6 +2487,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     },
     [
       applyBossDamageAndCheckBreaks,
+      consumeCannonCharge,
+      consumeJackpotProc,
       fireThunderStrike,
       spawnFloatingText,
       triggerCritPoisonBurst,
@@ -2447,13 +2590,15 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         triggerCritPoisonBurst(nextRun, nextMercs, nextMeta);
       }
 
-      // Hero clicks advance Slot 3 cannon charge (15 hits -> -1.0s)
+      // Hero clicks advance Slot 3 cannon charge (15 hits -> shared charge budget)
       if (nextMercs[2]?.unlocked && nextMercs[2].level > 0) {
         nextRun.swordAndHeroAttacksForCannon += clickCount;
         if (nextRun.swordAndHeroAttacksForCannon >= 15) {
           const steps = Math.floor(nextRun.swordAndHeroAttacksForCannon / 15);
           nextRun.swordAndHeroAttacksForCannon %= 15;
-          nextMercs[2].attackTimer += steps * 1.0;
+          nextMercs[2].attackTimer += consumeCannonCharge(
+            steps * CANNON_CHARGE_SEC_PER_15_ATTACKS
+          );
         }
       }
 
@@ -2539,6 +2684,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     },
     [
       applyBossDamageAndCheckBreaks,
+      consumeCannonCharge,
       executeMercAttack,
       spawnClickRipple,
       spawnFloatingText,
@@ -2642,6 +2788,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
           hero: prevRun.recentTickDps.hero,
           poison: prevRun.recentTickDps.poison,
           mercs: [...prevRun.recentTickDps.mercs] as [string, string, string, string, string],
+          bonus: prevRun.recentTickDps.bonus ?? '0',
         },
       };
       const nextMercs: MercenarySlotState[] = mercsRef.current.map((m) => ({ ...m }));
@@ -2814,6 +2961,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         hero: liveBreakdown.heroDps.toString(),
         poison: liveBreakdown.poisonTotalDps.toString(),
         mercs: mercDpsStrings,
+        bonus: liveBreakdown.clickLinkDps.add(liveBreakdown.cannonChargeDps).toString(),
       };
 
       // Late-game灵枢 Automation Cycle (runs every 0.25s; Tier 6 Mercs prioritized before Tier 5)
@@ -2850,12 +2998,18 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       }
 
       runRef.current = nextRun;
-      setRun(nextRun);
+      mercsRef.current = nextMercs;
 
-      const hasActiveMercs = nextMercs.some((m) => m.unlocked);
-      if (hasActiveMercs || shellBroke || autoPurchased) {
-        mercsRef.current = nextMercs;
-        setMercs(nextMercs);
+      // 逻辑仍为 20Hz，UI 降为 10Hz；破壳/胜利等关键事件强制立即同步。
+      uiSyncAccRef.current += dt;
+      const forceUiSync = shellBroke || autoPurchased || nextRun.runCompleted;
+      const shouldSyncUi = forceUiSync || uiSyncAccRef.current * 1000 >= UI_SYNC_MS;
+      if (shouldSyncUi) {
+        uiSyncAccRef.current = 0;
+        setRun(nextRun);
+        if (nextMercs.some((m) => m.unlocked)) {
+          setMercs(nextMercs);
+        }
       }
 
       const stonesChanged = nextMeta.affixStones !== metaRef.current.affixStones;
@@ -2887,9 +3041,12 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     triggerVibration,
   ]);
 
-  // Auto-save every 2s
+  // Auto-save every 2s（切后台时不写盘，减少移动端无意义写入与耗电）
   useEffect(() => {
-    const id = window.setInterval(saveToLocalStorage, 2000);
+    const id = window.setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      saveToLocalStorage();
+    }, 2000);
     const onUnload = () => saveToLocalStorage();
     window.addEventListener('beforeunload', onUnload);
     return () => {
@@ -2898,21 +3055,36 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     };
   }, [saveToLocalStorage]);
 
+  // 静默接入 TapTap 登录（单机玩法不依赖服务端，但平台审核要求接入）
+  useEffect(() => {
+    void ensureTapLogin();
+  }, []);
+
+  // WebView / 小游戏切后台时立即落盘，并尽量同步云端
+  useEffect(() => {
+    return subscribeAppLifecycle(
+      () => {
+        saveToLocalStorage();
+        void flushCloudSave();
+      },
+      () => {
+        // 回到前台时由 20Hz 主循环继续推进，离线结算只在冷启动时处理
+      }
+    );
+  }, [saveToLocalStorage]);
+
   const completeIntro = useCallback(() => {
-    setMeta((prev) => {
-      const next = { ...prev, hasSeenIntro: true };
-      metaRef.current = next;
-      return next;
-    });
+    const next = { ...metaRef.current, hasSeenIntro: true };
+    metaRef.current = next;
+    setMeta(next);
     saveToLocalStorage();
+    track('intro_complete');
   }, [saveToLocalStorage]);
 
   const replayIntro = useCallback(() => {
-    setMeta((prev) => {
-      const next = { ...prev, hasSeenIntro: false };
-      metaRef.current = next;
-      return next;
-    });
+    const next = { ...metaRef.current, hasSeenIntro: false };
+    metaRef.current = next;
+    setMeta(next);
   }, []);
 
   const dismissTutorial = useCallback(() => {
@@ -3344,12 +3516,14 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       }
 
       const curMeta = metaRef.current;
-      const stoneCost = 2;
-      const freeChance = Math.min(0.8, 0.05 * getRelicTotalLv(curMeta, 'rel_e_free_roll'));
+      const stoneCost = getSingleRerollCost(affixIdx);
+      // 【命运骰子】免单：上限 50%，且仅作用于单槽洗练
+      const freeChance = Math.min(0.5, 0.05 * getRelicTotalLv(curMeta, 'rel_e_free_roll'));
       const isFreeRoll = freeChance > 0 && Math.random() < freeChance;
+      const useAdToken = !isFreeRoll && curMeta.adFreeRerollTokens > 0;
 
-      if (!isFreeRoll && curMeta.affixStones < stoneCost) {
-        showToast(`词缀石不足（单槽精准重铸需 ${stoneCost} 颗）`);
+      if (!isFreeRoll && !useAdToken && curMeta.affixStones < stoneCost) {
+        showToast(`词缀石不足（该重道纹单槽重铸需 ${stoneCost} 颗）`);
         return;
       }
 
@@ -3370,7 +3544,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       const nextMeta: MetaState = {
         ...curMeta,
-        affixStones: isFreeRoll ? curMeta.affixStones : curMeta.affixStones - stoneCost,
+        affixStones:
+          isFreeRoll || useAdToken ? curMeta.affixStones : curMeta.affixStones - stoneCost,
+        adFreeRerollTokens: useAdToken
+          ? Math.max(0, curMeta.adFreeRerollTokens - 1)
+          : curMeta.adFreeRerollTokens,
         rerollPity: nextPity,
         totalRerolls: curMeta.totalRerolls + 1,
       };
@@ -3400,6 +3578,8 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         showToast('气运爆发！10次保底必出极品/仙品词缀！请确认替换');
       } else if (isFreeRoll) {
         showToast('触发【命运骰子】免单洗练！请确认替换');
+      } else if (useAdToken) {
+        showToast('已消耗 1 次广告免费洗练！请确认替换');
       }
     },
     [saveToLocalStorage, showToast, triggerVibration]
@@ -3424,12 +3604,11 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
       }
 
       const curMeta = metaRef.current;
-      const stoneCost = targetIndices.length;
-      const freeChance = Math.min(0.8, 0.05 * getRelicTotalLv(curMeta, 'rel_e_free_roll'));
-      const isFreeRoll = freeChance > 0 && Math.random() < freeChance;
+      const stoneCost = getBatchRerollCost(targetIndices);
+      // 批量洗练不受【命运骰子】免单影响，避免终局货币失效
 
-      if (!isFreeRoll && curMeta.affixStones < stoneCost) {
-        showToast(`词缀石不足（需 ${stoneCost} 颗，每未锁槽 1 颗）`);
+      if (curMeta.affixStones < stoneCost) {
+        showToast(`词缀石不足（需 ${stoneCost} 颗，按道纹深度阶梯计价）`);
         return;
       }
 
@@ -3458,7 +3637,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       const nextMeta: MetaState = {
         ...curMeta,
-        affixStones: isFreeRoll ? curMeta.affixStones : curMeta.affixStones - stoneCost,
+        affixStones: curMeta.affixStones - stoneCost,
         rerollPity: nextPity,
         totalRerolls: curMeta.totalRerolls + 1,
       };
@@ -3486,9 +3665,66 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
 
       if (triggeredPity) {
         showToast('气运爆发！10次保底必出极品/仙品词缀！请确认替换');
-      } else if (isFreeRoll) {
-        showToast('触发【命运骰子】免单洗练！请确认替换');
       }
+    },
+    [saveToLocalStorage, showToast, triggerVibration]
+  );
+
+  const quenchMercAffix = useCallback(
+    (slotIndex: number, affixIdx: number) => {
+      const slot = mercsRef.current[slotIndex];
+      if (!slot || !slot.unlocked) return;
+      if (affixIdx >= slot.unlockedLevelSlots) return;
+      if (slot.pendingLevelAffixes !== null) {
+        showToast('请先确认或放弃当前洗练结果');
+        return;
+      }
+
+      const inst = slot.levelAffixes[affixIdx];
+      if (!inst) {
+        showToast('该槽位尚无道纹，请先洗练出一条基础词缀');
+        return;
+      }
+
+      const nextTier = getNextAffixTier(inst.tier);
+      const cost = getQuenchCost(inst.tier);
+      if (!nextTier || cost === null) {
+        showToast('仙品已是道纹极致，无法继续淬炼');
+        return;
+      }
+
+      const curMeta = metaRef.current;
+      if (curMeta.affixStones < cost) {
+        showToast(`词缀石不足（淬炼至${AFFIX_TIER_META[nextTier].label}需 ${cost} 颗）`);
+        return;
+      }
+
+      const nextMercs = mercsRef.current.map((m, idx) =>
+        idx === slotIndex
+          ? {
+              ...m,
+              levelAffixes: m.levelAffixes.map((a, i) =>
+                i === affixIdx && a ? { ...a, tier: nextTier } : a
+              ),
+            }
+          : m
+      );
+      const nextMeta: MetaState = {
+        ...curMeta,
+        affixStones: curMeta.affixStones - cost,
+        totalRerolls: curMeta.totalRerolls + 1,
+      };
+
+      metaRef.current = nextMeta;
+      mercsRef.current = nextMercs;
+      setMeta(nextMeta);
+      setMercs(nextMercs);
+      saveToLocalStorage();
+      triggerVibration([18, 24, 18]);
+      showToast(
+        `淬炼成功：${AFFIXES[inst.id]?.name ?? '道纹'} 提升至【${AFFIX_TIER_META[nextTier].label}】`
+      );
+      track('affix_quench', { from: inst.tier, to: nextTier, cost });
     },
     [saveToLocalStorage, showToast, triggerVibration]
   );
@@ -4016,6 +4252,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
                       string,
                     ])
                   : baseRun.recentTickDps.mercs,
+              bonus: safeDecimalStr(parsed.run.recentTickDps?.bonus, '0'),
             },
           };
 
@@ -4077,6 +4314,41 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
     [showToast]
   );
 
+  // 新设备首次进入且本地无存档时，自动尝试恢复云存档。
+  // 本地已有存档时不自动覆盖，避免多设备互相拉扯；设置页提供手动恢复。
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      if (!cloudSaveAvailable()) return;
+      if (localStorage.getItem(STORAGE_KEY)) return;
+      const b64 = await loadCloudSave();
+      if (!cancelled && b64) {
+        const res = importSaveString(b64);
+        if (res.ok) track('cloud_restore_startup');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [importSaveString]);
+
+  // 用户完成隐私授权后再补一次云存档恢复：首启时授权弹窗会挡住平台接口。
+  useEffect(() => {
+    const onConsent = () => {
+      if (localStorage.getItem(STORAGE_KEY)) return;
+      void (async () => {
+        if (!cloudSaveAvailable()) return;
+        const b64 = await loadCloudSave();
+        if (b64) {
+          const res = importSaveString(b64);
+          if (res.ok) track('cloud_restore_after_consent');
+        }
+      })();
+    };
+    window.addEventListener('shishen:privacy-consent', onConsent);
+    return () => window.removeEventListener('shishen:privacy-consent', onConsent);
+  }, [importSaveString]);
+
   const hardResetAll = useCallback(
     (reloadAfter = false) => {
       isHardResettingRef.current = true;
@@ -4120,6 +4392,202 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
   const clearOfflineSummary = useCallback(() => {
     setOfflineSummary(null);
   }, []);
+
+  const offlineSummaryKey = offlineSummary
+    ? `${offlineSummary.tribulationId}:${offlineSummary.elapsedOfflineMs}:${offlineSummary.crystalsGained}:${offlineSummary.stonesGained}:${offlineSummary.affixStonesGained}`
+    : null;
+
+  useEffect(() => {
+    if (offlineSummaryKey && offlineAdBonusKeyRef.current !== offlineSummaryKey) {
+      setOfflineAdBonusClaimed(false);
+    }
+  }, [offlineSummaryKey]);
+
+  const claimOfflineAdBonus = useCallback((): boolean => {
+    if (!offlineSummary || !offlineSummaryKey) return false;
+    if (offlineAdBonusKeyRef.current === offlineSummaryKey) {
+      showToast('本次离线收益已领取过广告翻倍');
+      return false;
+    }
+
+    const curRun = runRef.current;
+    const curMeta = metaRef.current;
+    const crystals = toDecimal(offlineSummary.crystalsGained).add(
+      toDecimal(offlineSummary.overflowCrystals)
+    );
+    const stones = toDecimal(offlineSummary.stonesGained);
+    const nextRun: RunState = {
+      ...curRun,
+      spiritStones: toDecimal(curRun.spiritStones).add(stones).toString(),
+    };
+    const nextMeta: MetaState = {
+      ...curMeta,
+      divineCrystals: toDecimal(curMeta.divineCrystals).add(crystals).toString(),
+      affixStones: curMeta.affixStones + offlineSummary.affixStonesGained,
+    };
+
+    runRef.current = nextRun;
+    metaRef.current = nextMeta;
+    setRun(nextRun);
+    setMeta(nextMeta);
+    offlineAdBonusKeyRef.current = offlineSummaryKey;
+    setOfflineAdBonusClaimed(true);
+    saveToLocalStorage();
+    showToast(
+      `广告翻倍已发放：神晶 +${formatNumber(crystals)} · 灵石 +${formatNumber(stones)} · 词缀石 +${offlineSummary.affixStonesGained}`
+    );
+    track('ad_reward', { placement: 'offline_double' });
+    return true;
+  }, [offlineSummary, offlineSummaryKey, saveToLocalStorage, showToast]);
+
+  const canClaimDailyChest =
+    meta.lastDailyChestDay !== getTodayKey();
+
+  const claimDailyChest = useCallback((): boolean => {
+    const today = getTodayKey();
+    const curMeta = metaRef.current;
+    if (curMeta.lastDailyChestDay === today) {
+      showToast('今日天命宝箱已领取，明日再来');
+      return false;
+    }
+    const nextMeta: MetaState = {
+      ...curMeta,
+      divineCrystals: toDecimal(curMeta.divineCrystals).add(DAILY_CHEST_CRYSTALS).toString(),
+      affixStones: curMeta.affixStones + DAILY_CHEST_AFFIX_STONES,
+      lastDailyChestDay: today,
+    };
+    metaRef.current = nextMeta;
+    setMeta(nextMeta);
+    saveToLocalStorage();
+    showToast(
+      `天命宝箱：神晶 +${DAILY_CHEST_CRYSTALS} · 词缀石 +${DAILY_CHEST_AFFIX_STONES}`
+    );
+    track('daily_chest');
+    return true;
+  }, [saveToLocalStorage, showToast]);
+
+  const todayKey = getTodayKey();
+  const adRerollsUsedToday =
+    meta.lastAdRerollDay === todayKey ? meta.adRerollsToday : 0;
+  const canClaimAdRerollToken =
+    adRerollsUsedToday < MAX_DAILY_AD_REROLLS && meta.adFreeRerollTokens < MAX_DAILY_AD_REROLLS;
+
+  const claimAdRerollToken = useCallback((): boolean => {
+    const today = getTodayKey();
+    const curMeta = metaRef.current;
+    const used = curMeta.lastAdRerollDay === today ? curMeta.adRerollsToday : 0;
+    if (used >= MAX_DAILY_AD_REROLLS) {
+      showToast('今日广告免费洗练次数已用完');
+      return false;
+    }
+    const nextMeta: MetaState = {
+      ...curMeta,
+      lastAdRerollDay: today,
+      adRerollsToday: used + 1,
+      adFreeRerollTokens: Math.min(MAX_DAILY_AD_REROLLS, curMeta.adFreeRerollTokens + 1),
+    };
+    metaRef.current = nextMeta;
+    setMeta(nextMeta);
+    saveToLocalStorage();
+    showToast('获得 1 次免费洗练，已存入洗练面板');
+    track('ad_reward', { placement: 'free_reroll' });
+    return true;
+  }, [saveToLocalStorage, showToast]);
+
+  const adStoneBoostRemainingMs = Math.max(0, meta.adStoneBoostUntil - Date.now());
+  const adStoneBoostActive = adStoneBoostRemainingMs > 0;
+  const adStoneBoostsUsedToday =
+    meta.lastAdStoneBoostDay === todayKey ? meta.adStoneBoostsToday : 0;
+  const adStoneBoostsLeftToday = Math.max(
+    0,
+    MAX_DAILY_AD_STONE_BOOSTS - adStoneBoostsUsedToday
+  );
+  const canClaimAdStoneBoost = adStoneBoostsLeftToday > 0 && !adStoneBoostActive;
+
+  const claimAdStoneBoost = useCallback((): boolean => {
+    const today = getTodayKey();
+    const curMeta = metaRef.current;
+    const used = curMeta.lastAdStoneBoostDay === today ? curMeta.adStoneBoostsToday : 0;
+    if (used >= MAX_DAILY_AD_STONE_BOOSTS) {
+      showToast('今日灵石加速次数已用完');
+      return false;
+    }
+    const now = Date.now();
+    const nextMeta: MetaState = {
+      ...curMeta,
+      adStoneBoostUntil: now + AD_STONE_BOOST_DURATION_MS,
+      adStoneBoostMult: AD_STONE_BOOST_MULT,
+      lastAdStoneBoostDay: today,
+      adStoneBoostsToday: used + 1,
+    };
+    metaRef.current = nextMeta;
+    setMeta(nextMeta);
+    saveToLocalStorage();
+    showToast('伤害转化灵石 ×2 已启动，持续 10 分钟');
+    track('ad_reward', { placement: 'stone_boost' });
+    return true;
+  }, [saveToLocalStorage, showToast]);
+
+  const syncCloudNow = useCallback(async (): Promise<boolean> => {
+    if (!cloudSaveAvailable()) {
+      showToast('当前环境未提供云存档能力');
+      return false;
+    }
+    const cooldown = cloudUploadCooldownRemaining();
+    if (cooldown > 0) {
+      // 自动同步刚刚成功过；平台限制 1 次/分钟，不重复请求，也不提示失败。
+      const lastAt = getLastCloudUploadAt();
+      if (lastAt > 0) setLastCloudSavedAt(lastAt);
+      showToast(`云存档刚刚已自动同步，请 ${Math.ceil(cooldown / 1000)} 秒后再试`);
+      return true;
+    }
+    const payload: GameSaveData = {
+      version: 35,
+      savedAt: Date.now(),
+      run: runRef.current,
+      mercs: mercsRef.current,
+      meta: metaRef.current,
+      settings: settingsRef.current,
+    };
+    scheduleCloudSave(encodeBase64Utf8(JSON.stringify(payload)));
+    const ok = await flushCloudSave();
+    if (ok) {
+      setLastCloudSavedAt(Date.now());
+      showToast('云存档已上传');
+      track('cloud_save_manual');
+    } else {
+      showToast('云存档上传失败，请稍后重试');
+    }
+    return ok;
+  }, [showToast]);
+
+  const restoreFromCloud = useCallback(
+    async (force = false): Promise<CloudRestoreResult> => {
+      const b64 = await loadCloudSave();
+      if (!b64) {
+        showToast('未找到可恢复的云存档');
+        return { ok: false, reason: 'empty' };
+      }
+
+      const cloudSavedAt = peekSaveTimestamp(b64);
+      const localRaw = localStorage.getItem(STORAGE_KEY);
+      const localSavedAt = localRaw ? peekSaveTimestamp(localRaw) : 0;
+
+      // 防误覆盖：本地进度比云存档新时，需玩家显式确认
+      if (!force && localRaw && cloudSavedAt > 0 && localSavedAt > cloudSavedAt) {
+        return { ok: false, reason: 'older', cloudSavedAt, localSavedAt };
+      }
+
+      const res = importSaveString(b64);
+      if (!res.ok) {
+        showToast(res.error ?? '云存档恢复失败');
+        return { ok: false, reason: 'invalid' };
+      }
+      track('cloud_restore');
+      return { ok: true, cloudSavedAt, localSavedAt };
+    },
+    [importSaveString, showToast]
+  );
 
   const openLastClearReportModal = useCallback(() => {
     if (lastClearReport) {
@@ -4178,6 +4646,21 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         activeTutorial,
         clearVictorySummary,
         clearOfflineSummary,
+        offlineAdBonusClaimed,
+        claimOfflineAdBonus,
+        claimDailyChest,
+        canClaimDailyChest,
+        claimAdRerollToken,
+        canClaimAdRerollToken,
+        claimAdStoneBoost,
+        canClaimAdStoneBoost,
+        adStoneBoostActive,
+        adStoneBoostRemainingMs,
+        adStoneBoostsLeftToday,
+        cloudAvailable: cloudSaveAvailable(),
+        lastCloudSavedAt,
+        syncCloudNow,
+        restoreFromCloud,
         openLastClearReportModal,
         quickRestartAfterSilentClear,
         completeIntro,
@@ -4195,6 +4678,7 @@ export function GameProvider({ children }: { children: React.ReactNode }) {
         toggleAffixLock,
         rerollMercSingleSlot,
         rerollMercBatchSlots,
+        quenchMercAffix,
         confirmPendingLevelAffixes,
         rerollMercInnate,
         confirmPendingInnateAffix,

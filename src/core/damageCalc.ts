@@ -8,13 +8,18 @@ import { ARCHETYPES } from '../config/archetypes';
 import { BOSS_SHELLS, TRIBULATIONS, TRIBULATION_MAP } from '../config/bosses';
 import { RELICS } from '../config/relics';
 import {
+  AFFIX_REROLL_COST_BATCH,
+  AFFIX_REROLL_COST_SINGLE,
   BASE_HERO_ATK,
+  CANNON_CHARGE_SEC_PER_15_ATTACKS,
   BASE_MANA_CAP,
   BASE_MANA_REGEN,
   BASE_MANUAL_CLICK_MANA,
   LEVEL_SLOT_THRESHOLDS,
   MAX_ATTACKS_PER_SEC,
+  MAX_CANNON_CHARGE_SEC_PER_SEC,
   MIN_ATTACK_INTERVAL,
+  POISON_STACK_EXPONENT,
   PUPPET_MAX_LEVEL,
   REALM_TIERS,
   SKILLS,
@@ -37,6 +42,98 @@ export function getRelicTotalLv(meta: MetaState, relicId: RelicId): number {
 
 export function getTribulationConfig(id: TribulationId) {
   return TRIBULATION_MAP[id] ?? TRIBULATION_MAP.tier_1;
+}
+
+// ============================================================================
+// 词缀石经济模型 (v3.8)
+// ----------------------------------------------------------------------------
+// 1. `BOSS_SHELLS.baseAffixStones` 只作躯壳深度权重，越深越厚；
+// 2. 每个劫数用 `stonePerShell` 定义「每重躯壳期望掉落」，全通 = 10 × stonePerShell；
+// 3. 期望值支持小数：整数部分必掉，小数部分按概率补 1 颗，天然形成「低概率小惊喜」；
+// 4. 遗物/词缀的掉率加成统一改为乘法并封顶，避免无限通胀。
+// ============================================================================
+const SHELL_STONE_WEIGHT_TOTAL = BOSS_SHELLS.reduce((sum, sh) => sum + sh.baseAffixStones, 0);
+const SHELL_STONE_WEIGHT_MEAN = SHELL_STONE_WEIGHT_TOTAL / BOSS_SHELLS.length;
+
+/** 【贪婪触须】词缀石加成上限 */
+export const MAX_ESSENCE_STONE_BONUS_PCT = 150;
+/** 【寻宝天眼】全队词缀石加成上限 */
+export const MAX_AFFIX_STONE_BONUS_PCT = 100;
+
+export function getStoneDropBonusPct(meta: MetaState, mercs: MercenarySlotState[]): number {
+  const essencePct = Math.min(
+    MAX_ESSENCE_STONE_BONUS_PCT,
+    getRelicTotalLv(meta, 'rel_r_essence') * 4
+  );
+  const affixPct = Math.min(
+    MAX_AFFIX_STONE_BONUS_PCT,
+    sumAllActiveAffixRatio(mercs, 'af_t2_stone_p', getRelicTotalLv(meta, 'rel_m_first_affix')) * 100
+  );
+  return essencePct + affixPct;
+}
+
+/** 指定劫数、指定重数躯壳的词缀石期望掉落（含遗物/词缀加成） */
+export function getShellStoneExpectation(
+  tribulationId: TribulationId,
+  phase: number,
+  meta?: MetaState,
+  mercs?: MercenarySlotState[]
+): number {
+  const trib = getTribulationConfig(tribulationId);
+  const shell = BOSS_SHELLS[phase];
+  if (!shell) return 0;
+  const depthWeight = shell.baseAffixStones / SHELL_STONE_WEIGHT_MEAN;
+  const bonusPct = meta && mercs ? getStoneDropBonusPct(meta, mercs) : 0;
+  return trib.stonePerShell * depthWeight * (1 + bonusPct / 100);
+}
+
+/** 单次全通的词缀石期望（10 重躯壳相加，不含破界断剑双倍） */
+export function getTribulationStonePerClear(
+  tribulationId: TribulationId,
+  meta?: MetaState,
+  mercs?: MercenarySlotState[]
+): number {
+  let total = 0;
+  for (let i = 0; i < BOSS_SHELLS.length; i++) {
+    total += getShellStoneExpectation(tribulationId, i, meta, mercs);
+  }
+  return total;
+}
+
+/** 把小数期望掷成整数：整数部分必掉，小数部分按概率补 1 颗 */
+export function rollStoneDrops(expected: number, multiplier = 1): number {
+  const scaled = Math.max(0, expected * multiplier);
+  const guaranteed = Math.floor(scaled);
+  return guaranteed + (Math.random() < scaled - guaranteed ? 1 : 0);
+}
+
+/** 掷一次全通（10 重躯壳）的词缀石总量 */
+export function rollTribulationStoneDrops(
+  tribulationId: TribulationId,
+  meta?: MetaState,
+  mercs?: MercenarySlotState[]
+): number {
+  let total = 0;
+  for (let i = 0; i < BOSS_SHELLS.length; i++) {
+    total += rollStoneDrops(getShellStoneExpectation(tribulationId, i, meta, mercs));
+  }
+  return total;
+}
+
+/** 单槽洗练消耗（按槽位阶梯定价） */
+export function getSingleRerollCost(affixIdx: number): number {
+  const i = Math.min(Math.max(0, affixIdx), AFFIX_REROLL_COST_SINGLE.length - 1);
+  return AFFIX_REROLL_COST_SINGLE[i];
+}
+
+/** 批量洗练消耗（每个未锁槽位按阶梯计价） */
+export function getBatchRerollCost(indices: readonly number[]): number {
+  let total = 0;
+  for (const idx of indices) {
+    const i = Math.min(Math.max(0, idx), AFFIX_REROLL_COST_BATCH.length - 1);
+    total += AFFIX_REROLL_COST_BATCH[i];
+  }
+  return total;
 }
 
 export function getBossTotalHp(tribulationId: TribulationId, meta: MetaState): Decimal {
@@ -250,7 +347,8 @@ export function getRelicPoolBreakdown(
 
   const stoneLog10 = Math.max(0, Math.floor(toDecimal(run.spiritStones).max(1).log10()));
   const stoneSurgeLv = getRelicTotalLv(meta, 'rel_s_stone_surge');
-  const stoneSurge = stoneLog10 * 0.005 * stoneSurgeLv;
+  // 点石成金印：与混沌道海一致，战术池封顶 +250%，避免灵石数量级继续放大 DPS
+  const stoneSurge = Math.min(2.5, stoneLog10 * 0.005 * stoneSurgeLv);
 
   const voidManaLv = getRelicTotalLv(meta, 'rel_e_void_mana');
   const voidMana = Math.min(2.5, (run.manaSpentThisRun ?? 0) * 0.0001 * voidManaLv);
@@ -269,13 +367,13 @@ export function getRelicPoolBreakdown(
   const finalMultCrystalLv = meta.relicLevels.rel_m_final_mult ?? 0;
   const finalMultDropLv = meta.relicDropLevels?.rel_m_final_mult ?? 0;
 
-  const infinityPoolMult = Decimal.pow(1.032, infDmgCrystalLv)
-    .mul(Decimal.pow(1.008, infDmgDropLv))
-    .mul(Decimal.pow(1.09, finalMultCrystalLv))
-    .mul(Decimal.pow(1.022, finalMultDropLv));
+  const infinityPoolMult = Decimal.pow(1.025, infDmgCrystalLv)
+    .mul(Decimal.pow(1.006, infDmgDropLv))
+    .mul(Decimal.pow(1.07, finalMultCrystalLv))
+    .mul(Decimal.pow(1.015, finalMultDropLv));
 
   const heroClickMult = 1 + 0.04 * getRelicTotalLv(meta, 'rel_c_click_mult');
-  const mercBaseAllPct = 0.03 * getRelicTotalLv(meta, 'rel_c_merc_atk');
+  const mercBaseAllPct = 0.025 * getRelicTotalLv(meta, 'rel_c_merc_atk');
   const crystalMult = getRelicCrystalBonusMult(meta);
   const stoneBonusPct = 0.04 * getRelicTotalLv(meta, 'rel_c_stone_gain');
   const costMult = getCostReductionMult(meta);
@@ -498,6 +596,15 @@ export function getMercPanelBaseDirect(
     .mul(milestoneMult);
 }
 
+/** 护法单次攻击拆出的基础命中段数（剑气 5 / 机神连射 3 / 其他 1） */
+export function getMercBaseVolley(slot: MercenarySlotState): number {
+  return slot.innateAffix === 'sp_sword_storm'
+    ? 5
+    : slot.innateAffix === 'sp_cannon_gat'
+      ? 3
+      : 1;
+}
+
 export interface MercComputedStats {
   effLevel: number;
   rawDmg: Decimal;
@@ -515,6 +622,8 @@ export interface MercComputedStats {
   cdReduceCanSec: number;
   jackpotChance: number;
   manaOnHitChance: number;
+  baseVolley: number;
+  expectedStrikesPerAttack: number;
   dpsEstimate: Decimal;
 }
 
@@ -546,6 +655,8 @@ export function getMercenaryComputedStats(
       cdReduceCanSec: 0,
       jackpotChance: 0,
       manaOnHitChance: 0,
+      baseVolley: 0,
+      expectedStrikesPerAttack: 0,
       dpsEstimate: new Decimal(0),
     };
   }
@@ -579,22 +690,24 @@ export function getMercenaryComputedStats(
   }
 
   // Step 4: Self affixes & Cross-merc synergies
-  const poisonScaleBonus = Math.min(
-    12.0,
-    Math.floor(run.poisonStacks / 10) * sumSelf('af_t3_p_scale')
-  );
+  // 以毒攻毒是触母的专属毒伤放大器，避免被机神拿去做通用直伤乘区
+  const poisonScaleBonus =
+    slotIndex === 1
+      ? Math.min(6.0, Math.floor(run.poisonStacks / 10) * sumSelf('af_t3_p_scale'))
+      : 0;
   const earlyBonus = run.phaseIndex <= 4 ? sumSelf('af_t1_early') : 0;
   const lateBonus = run.phaseIndex >= 5 ? sumSelf('af_t1_late') : 0;
   const hpRatio = toDecimal(run.bossHp).div(toDecimal(run.bossMaxHp).max(1)).toNumber();
   const executeBonus = hpRatio < 0.3 ? sumSelf('af_t2_execute') : 0;
   const stackBonus = Math.min(100, Math.floor(slot.attackCount / 50)) * sumSelf('af_t2_stack');
-  const flatLvBonus = Math.floor(effLevel / 25) * sumSelf('af_t1_flat_lv');
+  // 强体：等级加算改为带上限的线性项，避免 40 层 × 金品 7× 越级
+  const flatLvBonus = Math.min(3.0, Math.floor(effLevel / 25) * sumSelf('af_t1_flat_lv'));
 
   const affixSelfMult =
     1 + sumSelf('af_t1_atk') + earlyBonus + lateBonus + executeBonus + stackBonus + flatLvBonus;
-  // Cap per-merc century compounding ratio at 120% (+1.2) so one affix cannot crowd out build diversity
-  const centuryRatio = Math.min(1.2, sumSelf('af_t2_century'));
-  const centuryMult = Decimal.pow(1 + centuryRatio, Math.floor(effLevel / 100));
+  // 百炼成仙：每整百有效级线性加算，单护法合计上限 +90%
+  const centuryRatio = Math.min(0.9, sumSelf('af_t2_century'));
+  const centuryMult = new Decimal(1 + centuryRatio * Math.floor(effLevel / 100));
 
   const loneSelf = sumSelf('af_t3_lone');
   let otherLoneCount = 0;
@@ -607,15 +720,18 @@ export function getMercenaryComputedStats(
       }
     }
   }
-  const loneWolfMult = (1 + loneSelf) * Math.pow(0.75, otherLoneCount);
+  const loneWolfMult = (1 + loneSelf) * Math.pow(0.85, otherLoneCount);
 
+  // 左右逢源：由「相邻」改为「自身以外的其他 4 人」，并封顶 +300%
   let adjBuff = 0;
-  for (const neighborIdx of [slotIndex - 1, slotIndex + 1]) {
-    const nSlot = mercs[neighborIdx];
+  for (let j = 0; j < mercs.length; j++) {
+    if (j === slotIndex) continue;
+    const nSlot = mercs[j];
     if (nSlot?.unlocked && nSlot.level > 0) {
       adjBuff += sumMercActiveAffixRatio(nSlot, 'af_t3_adj_dmg', s5, firstAffixRelicLv);
     }
   }
+  adjBuff = Math.min(3.0, adjBuff);
 
   const slot1EffLv = mercs[0]?.unlocked ? getEffectiveLevel(mercs[0]) : 0;
   const slot2EffLv = mercs[1]?.unlocked ? getEffectiveLevel(mercs[1]) : 0;
@@ -623,28 +739,43 @@ export function getMercenaryComputedStats(
   const slot4EffLv = mercs[3]?.unlocked ? getEffectiveLevel(mercs[3]) : 0;
   const totalEffLevels = mercs.reduce((s, m) => s + getEffectiveLevel(m), 0);
 
-  const crossSelfSynergy =
-    Math.floor(slot1EffLv / 10) * sumSelf('af_t3_sword_s') +
-    Math.floor(slot2EffLv / 10) * sumSelf('af_t3_tent_s') +
-    Math.floor(totalEffLevels / 50) * sumSelf('af_t3_total_l');
-  const arrTeamBonus = sumAllActiveAffixRatio(mercs, 'af_t3_arr_s', firstAffixRelicLv);
+  // 跨护法联动：每一条都单独封顶，避免单槽在千级被线性层数放大成数十倍
+  const swordSynergy =
+    slotIndex === 0
+      ? Math.min(3.0, Math.floor(slot1EffLv / 10) * sumSelf('af_t3_sword_s'))
+      : 0;
+  const tentacleSynergy =
+    slotIndex === 1
+      ? Math.min(3.0, Math.floor(slot2EffLv / 10) * sumSelf('af_t3_tent_s'))
+      : 0;
+  const totalLevelSynergy = Math.min(
+    2.0,
+    Math.floor(totalEffLevels / 50) * sumSelf('af_t3_total_l')
+  );
+  const crossSelfSynergy = swordSynergy + tentacleSynergy + totalLevelSynergy;
+  const arrTeamBonus =
+    mercs[3]?.unlocked && mercs[3].level > 0
+      ? Math.min(
+          3.0,
+          sumMercActiveAffixRatio(mercs[3], 'af_t3_arr_s', s5, firstAffixRelicLv) *
+            Math.floor(slot4EffLv / 10)
+        )
+      : 0;
 
   const crossMercSynergyMult =
-    (1 + crossSelfSynergy + arrTeamBonus * Math.floor(slot4EffLv / 10) + poisonScaleBonus) *
-    (1 + adjBuff) *
-    loneWolfMult;
+    (1 + crossSelfSynergy + arrTeamBonus + poisonScaleBonus) * (1 + adjBuff) * loneWolfMult;
 
   // Step 5: Slot 4 Aura (Slot 1~3) + Additive Pool A Merc Relics + Hero Link
   const slot4AuraMult =
     mercs[3]?.unlocked && mercs[3].level > 0 && slotIndex <= 2
-      ? 1 + slot4EffLv * 0.06 * (1 + 0.03 * arrayRelicLv)
+      ? 1 + slot4EffLv * 0.02 * (1 + 0.02 * arrayRelicLv)
       : 1;
 
-  const mercAtkRelicPct = 0.03 * getRelicTotalLv(meta, 'rel_c_merc_atk');
+  const mercAtkRelicPct = 0.025 * getRelicTotalLv(meta, 'rel_c_merc_atk');
   let specRelicPct = 0;
-  if (slotIndex === 0) specRelicPct = 0.05 * getRelicTotalLv(meta, 'rel_r_sword_dmg');
-  else if (slotIndex === 1) specRelicPct = 0.05 * getRelicTotalLv(meta, 'rel_r_tentacle');
-  else if (slotIndex === 2) specRelicPct = 0.05 * getRelicTotalLv(meta, 'rel_r_cannon_dmg');
+  if (slotIndex === 0) specRelicPct = 0.07 * getRelicTotalLv(meta, 'rel_r_sword_dmg');
+  else if (slotIndex === 1) specRelicPct = 0.07 * getRelicTotalLv(meta, 'rel_r_tentacle');
+  else if (slotIndex === 2) specRelicPct = 0.04 * getRelicTotalLv(meta, 'rel_r_cannon_dmg');
   const mercRelicMult = 1 + mercAtkRelicPct + specRelicPct;
 
   const heroLinkAdd = heroBasePower.mul(sumSelf('af_t3_hero_ln'));
@@ -675,7 +806,9 @@ export function getMercenaryComputedStats(
   const critDmg =
     arch.baseCritDmg +
     sumSelf('af_t1_crit_d') +
-    Math.floor(slot3EffLv / 10) * sumSelf('af_t3_can_s') +
+    (slotIndex === 2
+      ? Math.min(3.0, Math.floor(slot3EffLv / 10) * sumSelf('af_t3_can_s'))
+      : 0) +
     0.04 * critDmgRelic +
     omniOverflowDmg;
 
@@ -685,13 +818,13 @@ export function getMercenaryComputedStats(
     .mul(crossMercSynergyMult)
     .mul(slot4AuraMult)
     .mul(mercRelicMult)
-    .mul(overflowSpdMult)
     .add(heroLinkAdd)
+    .mul(overflowSpdMult)
     .mul(globalMult)
     .mul(trib.debuff.directDmgMult ?? 1);
 
   if (slotIndex === 2 && run.phaseIndex >= 5) {
-    rawDmg = rawDmg.mul(3);
+    rawDmg = rawDmg.mul(2.25);
   }
 
   const skill4Bonus = skill4Active
@@ -711,11 +844,17 @@ export function getMercenaryComputedStats(
       .mul(milestoneMult);
 
     const poisonAffixSum = sumAllActiveAffixRatio(mercs, 'af_t1_poison', firstAffixRelicLv);
-    const tentSymbiosisSum = sumAllActiveAffixRatio(mercs, 'af_t3_tent_s', firstAffixRelicLv);
+    // 深渊共生已改为触母专属，毒面板只读取 2 号位自身
+    const tentSymbiosisSum = sumMercActiveAffixRatio(
+      slot,
+      'af_t3_tent_s',
+      s5,
+      firstAffixRelicLv
+    );
     const poisonRelicPool =
       1 +
-      0.03 * getRelicTotalLv(meta, 'rel_c_merc_atk') +
-      0.05 * getRelicTotalLv(meta, 'rel_r_tentacle');
+      0.025 * getRelicTotalLv(meta, 'rel_c_merc_atk') +
+      0.07 * getRelicTotalLv(meta, 'rel_r_tentacle');
 
     poisonPanelPerSec = poisonBasePanel
       .mul(1 + poisonAffixSum)
@@ -734,8 +873,7 @@ export function getMercenaryComputedStats(
   const jackpotChance = Math.min(1.0, sumSelf('af_t2_jackpot'));
   const manaOnHitChance = Math.min(1.0, sumSelf('af_t2_mana_h'));
 
-  const baseVolley =
-    slot.innateAffix === 'sp_sword_storm' ? 5 : slot.innateAffix === 'sp_cannon_gat' ? 3 : 1;
+  const baseVolley = getMercBaseVolley(slot);
   const talent1Extra = slotIndex === 0 ? 0.2 * 2 : 0; // 20% chance of 2 extra strikes
   const expectedStrikesPerAttack =
     baseVolley + talent1Extra + doubleHitChance + tripleHitChance * 3;
@@ -758,6 +896,8 @@ export function getMercenaryComputedStats(
     cdReduceCanSec,
     jackpotChance,
     manaOnHitChance,
+    baseVolley,
+    expectedStrikesPerAttack,
     dpsEstimate,
   };
 }
@@ -788,7 +928,9 @@ export function getPoisonTickExpectedDamage(
     rawHeroClick,
     globalMult
   );
-  const rawPoison = st2.poisonPanelPerSec.mul(run.poisonStacks);
+  const rawPoison = st2.poisonPanelPerSec.mul(
+    Math.pow(run.poisonStacks, POISON_STACK_EXPONENT)
+  );
   const dotCritLv = getRelicTotalLv(meta, 'rel_e_dot_crit');
   if (dotCritLv <= 0) {
     return { rawPoison, critChance: 0, critDmg: 1, expectedPoison: rawPoison };
@@ -806,6 +948,22 @@ export interface TeamCombatDpsBreakdown {
   poisonProcDps: Decimal;
   poisonTotalDps: Decimal;
   mercDpsList: [Decimal, Decimal, Decimal, Decimal, Decimal];
+  /** 伴生剑意 + 御剑随心 + 万道合击的点击联动伤害（原 HUD/离线遗漏） */
+  clickLinkDps: Decimal;
+  /** 其中万道合击部分，便于归因 */
+  clickStormDps: Decimal;
+  /** 机神充能带来的额外攻击伤害（原 HUD/离线遗漏） */
+  cannonChargeDps: Decimal;
+  /** 点击联动按护法归因（含万道合击），用于平衡审计与构筑归因 */
+  clickLinkBySlot: Decimal[];
+  /** 万道合击按护法归因 */
+  clickStormBySlot: Decimal[];
+  /** 主角实际点击事件/秒（傀儡 + 残影；溢出倍率只作用于伤害，不增加事件数） */
+  clicksPerSec: number;
+  /** 护法攻击事件/秒（间隔驱动 + 点击联动额外攻击 + 机神充能额外攻击） */
+  attacksPerSec: number;
+  /** 护法命中事件/秒（单次攻击可拆多段，因此可高于 25） */
+  hitsPerSec: number;
   totalDps: Decimal;
 }
 
@@ -813,6 +971,8 @@ export interface TeamCombatDpsBreakdown {
  * Single source of truth for live HUD DPS, build attribution bars, forge previews,
  * and offline combat advancement. Properly separates Puppet (with 25/s overflow)
  * from Clone skill rate, and includes expected crit-poison & pop-dot bursts.
+ *
+ * v3.9: 补全点击联动与机神充能两条伤害线；明确“攻击事件”与“命中事件”的区别。
  */
 export function getTeamCombatDpsBreakdown(
   run: RunState,
@@ -839,6 +999,9 @@ export function getTeamCombatDpsBreakdown(
       ? getSkillEffectiveValues('sk_clone', effectiveRun.skills.sk_clone.level, mercs, meta)
           .effectValue
       : 0;
+  // Over-cap clone rate is converted 1:1 into damage, not into extra click events.
+  const cloneClickRate = Math.min(MAX_ATTACKS_PER_SEC, cloneRateNow);
+  const clicksPerSec = heroStats.puppetRate + cloneClickRate;
 
   const heroDps = heroStats.expectedHeroClick.mul(
     heroStats.puppetRate * heroStats.puppetOverflowMult + cloneRateNow
@@ -872,26 +1035,104 @@ export function getTeamCombatDpsBreakdown(
     st ? st.dpsEstimate : new Decimal(0)
   ) as [Decimal, Decimal, Decimal, Decimal, Decimal];
 
+  // Click-linked free attacks (base volley only, no double/triple procs).
+  const freeAttackRateBySlot: number[] = mercs.map(() => 0);
+  if (mercs[0]?.unlocked && mercs[0].level > 0) {
+    freeAttackRateBySlot[0] += clicksPerSec / 12; // 剑侍天赋② 御剑随心
+  }
+  for (let idx = 0; idx < mercs.length; idx++) {
+    const st = mercComputed[idx];
+    if (st) freeAttackRateBySlot[idx] += (clicksPerSec / 20) * st.clickTrigChance;
+  }
+
+  const clickLinkBySlot: Decimal[] = mercs.map(() => new Decimal(0));
+  for (let idx = 0; idx < mercs.length; idx++) {
+    const st = mercComputed[idx];
+    if (!st || freeAttackRateBySlot[idx] <= 0) continue;
+    clickLinkBySlot[idx] = clickLinkBySlot[idx].add(
+      st.expectedDmg.mul(st.baseVolley).mul(freeAttackRateBySlot[idx])
+    );
+  }
+
+  const clickStormLv = getRelicTotalLv(meta, 'rel_e_click_storm');
+  const clickStormBySlot: Decimal[] = mercs.map(() => new Decimal(0));
+  let clickStormDps = new Decimal(0);
+  if (clickStormLv > 0 && clicksPerSec > 0) {
+    for (let idx = 0; idx < mercs.length; idx++) {
+      const st = mercComputed[idx];
+      if (!st) continue;
+      const part = st.expectedDmg.mul(0.04 * clickStormLv).mul(clicksPerSec / 10);
+      clickStormBySlot[idx] = part;
+      clickLinkBySlot[idx] = clickLinkBySlot[idx].add(part);
+      clickStormDps = clickStormDps.add(part);
+    }
+  }
+  const clickLinkDps = clickLinkBySlot.reduce((acc, v) => acc.add(v), new Decimal(0));
+
+  // 机神充能：剑侍/主角每 15 次攻击 + 雷火装填，合计封顶 1.0 秒/秒（最多攻速翻倍）
+  const slot1Stats = mercComputed[0];
+  const cannonStats = mercComputed[2];
+  let cannonChargeAttackRate = 0;
+  let cannonChargeDps = new Decimal(0);
+  let cannonChargeSecPerSec = 0;
+  if (cannonStats) {
+    // 即使剑侍未解锁，主角点击也应继续为机神充能
+    const slot1AttackRate = slot1Stats
+      ? 1 / slot1Stats.interval + freeAttackRateBySlot[0]
+      : freeAttackRateBySlot[0];
+    const attackChargeSecPerSec =
+      ((slot1AttackRate + clicksPerSec) * CANNON_CHARGE_SEC_PER_15_ATTACKS) / 15;
+    let reloadChargeSecPerSec = 0;
+    for (let idx = 0; idx < mercComputed.length; idx++) {
+      if (idx === 2) continue;
+      const st = mercComputed[idx];
+      if (!st || st.cdReduceCanSec <= 0) continue;
+      reloadChargeSecPerSec +=
+        (1 / st.interval + freeAttackRateBySlot[idx]) * st.cdReduceCanSec;
+    }
+    cannonChargeSecPerSec = Math.min(
+      MAX_CANNON_CHARGE_SEC_PER_SEC,
+      attackChargeSecPerSec + reloadChargeSecPerSec
+    );
+    cannonChargeAttackRate = cannonChargeSecPerSec / cannonStats.interval;
+    cannonChargeDps = cannonStats.expectedDmg
+      .mul(cannonStats.expectedStrikesPerAttack)
+      .mul(cannonChargeAttackRate);
+  }
+
+  let attacksPerSec = 0;
+  let hitsPerSec = 0;
+  const hitRateBySlot = mercComputed.map((st, idx) => {
+    if (!st) return 0;
+    const baseAttacks = 1 / st.interval;
+    const chargeAttacks = idx === 2 ? cannonChargeAttackRate : 0;
+    attacksPerSec += baseAttacks + chargeAttacks + freeAttackRateBySlot[idx];
+    const hits =
+      (baseAttacks + chargeAttacks) * st.expectedStrikesPerAttack +
+      freeAttackRateBySlot[idx] * st.baseVolley;
+    hitsPerSec += hits;
+    return hits;
+  });
+
   let poisonProcDps = new Decimal(0);
   if (poisonPassiveDps.gt(0) && mercs[1]?.unlocked && mercs[1].level > 0) {
     let expectedBurstFactorPerSec = 0;
     for (let idx = 0; idx < mercs.length; idx++) {
-      const m = mercs[idx];
       const st = mercComputed[idx];
-      if (!m?.unlocked || m.level <= 0 || !st) continue;
-      const baseVolley =
-        m.innateAffix === 'sp_sword_storm' ? 5 : m.innateAffix === 'sp_cannon_gat' ? 3 : 1;
-      const talent1Extra = idx === 0 ? 0.4 : 0;
-      const hitsPerSec =
-        (baseVolley + talent1Extra + st.doubleHitChance + st.tripleHitChance * 3) / st.interval;
+      if (!st) continue;
       expectedBurstFactorPerSec +=
-        hitsPerSec * (st.critRate * 0.3 + st.poisonPopChance);
+        hitRateBySlot[idx] * (st.critRate * 0.3 + st.poisonPopChance);
     }
     poisonProcDps = poisonPassiveDps.mul(expectedBurstFactorPerSec);
   }
 
   const poisonTotalDps = poisonPassiveDps.add(poisonProcDps);
-  const totalDps = mercDpsList.reduce((acc, v) => acc.add(v), heroDps.add(poisonTotalDps));
+  const totalDps = mercDpsList
+    .reduce((acc, v) => acc.add(v), new Decimal(0))
+    .add(heroDps)
+    .add(poisonTotalDps)
+    .add(clickLinkDps)
+    .add(cannonChargeDps);
 
   return {
     heroDps,
@@ -899,6 +1140,14 @@ export function getTeamCombatDpsBreakdown(
     poisonProcDps,
     poisonTotalDps,
     mercDpsList,
+    clickLinkDps,
+    clickStormDps,
+    clickLinkBySlot,
+    clickStormBySlot,
+    cannonChargeDps,
+    clicksPerSec,
+    attacksPerSec,
+    hitsPerSec,
     totalDps,
   };
 }
@@ -906,14 +1155,15 @@ export function getTeamCombatDpsBreakdown(
 export function getSpiritStoneMultiplier(
   mercs: MercenarySlotState[],
   run: RunState,
-  meta: MetaState
+  meta: MetaState,
+  applyAdBoost = true
 ): number {
   const firstAffixRelicLv = getRelicTotalLv(meta, 'rel_m_first_affix');
   const arrayRelicLv = getRelicTotalLv(meta, 'rel_r_array_buff');
   const slot4Unlocked = Boolean(mercs[3]?.unlocked && mercs[3].level > 0);
   const slot4EffLv = slot4Unlocked ? getEffectiveLevel(mercs[3]) : 0;
   const slot4GoldBonus = slot4Unlocked
-    ? (1.2 + slot4EffLv * 0.04) * (1 + 0.03 * arrayRelicLv)
+    ? (1.2 + slot4EffLv * 0.04) * (1 + 0.02 * arrayRelicLv)
     : 0;
 
   const goldAffix = sumAllActiveAffixRatio(mercs, 'af_t2_gold', firstAffixRelicLv);
@@ -926,11 +1176,18 @@ export function getSpiritStoneMultiplier(
   const trib = getTribulationConfig(run.tribulationId);
   const tierDebuff = trib.debuff.stoneMult ?? 1;
 
+  // 广告灵石加速：只影响灵石转化，不影响伤害与平衡审计
+  const adBoost =
+    applyAdBoost && Date.now() < (meta.adStoneBoostUntil ?? 0)
+      ? Math.max(1, meta.adStoneBoostMult ?? 1)
+      : 1;
+
   return (
     0.15 *
     (1 + slot4GoldBonus + goldAffix + 0.04 * stoneRelicLv) *
     stagePenalty *
-    tierDebuff
+    tierDebuff *
+    adBoost
   );
 }
 

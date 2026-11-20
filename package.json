@@ -1,7 +1,7 @@
 {
   "name": "godslayer-dao",
   "private": true,
-  "version": "3.6.0",
+  "version": "3.11.0",
   "description": "《弑神道果：万亿亿劫》— 修仙×克苏鲁策略构筑与天文数字增量放置游戏",
   "type": "module",
   "scripts": {
@@ -9,7 +9,12 @@
     "build": "vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "econ:check": "tsx scripts/econ-check.ts",
+    "build:minigame": "vite build --mode minigame --outDir dist-minigame",
+    "preview:minigame": "vite preview --outDir dist-minigame",
+    "damage:sim": "tsx scripts/damage-sim.ts",
+    "balance:audit": "tsx scripts/balance-audit.ts"
   },
   "dependencies": {
     "@tailwindcss/vite": "^4.3.3",

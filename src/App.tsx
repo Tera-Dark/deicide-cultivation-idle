@@ -15,11 +15,13 @@ import {
   VictoryModal,
 } from './components/Modals';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { PrivacyConsent } from './components/PrivacyConsent';
 import { TabHero } from './components/TabHero';
 import { TabMercenaries } from './components/TabMercenaries';
 import { TabRelics } from './components/TabRelics';
 import { TopStatusBar } from './components/TopStatusBar';
 import { RichLoreText } from './config/highlights';
+import { trackError } from './platform/telemetry';
 import { GameProvider, useGameStore } from './stores/useGameStore';
 import type { BuyMode } from './types/game';
 
@@ -40,7 +42,7 @@ class ErrorBoundary extends Component<
   }
 
   componentDidCatch(error: unknown) {
-    console.error('ErrorBoundary caught UI error:', error);
+    trackError(error, 'react_error_boundary');
   }
 
   render() {
@@ -326,6 +328,7 @@ export default function App() {
   return (
     <ErrorBoundary>
       <GameProvider>
+        <PrivacyConsent />
         <OfflineIndicator />
         <GameShell />
       </GameProvider>

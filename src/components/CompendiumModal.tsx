@@ -23,6 +23,7 @@ import { BOSS_SHELLS, TRIBULATIONS } from '../config/bosses';
 import {
   LEVEL_SLOT_NAMES,
   LEVEL_SLOT_THRESHOLDS,
+  AFFIX_QUENCH_COSTS,
   MERC_SLOT_CRYSTAL_COSTS,
   REALM_TIERS,
   SKILLS,
@@ -60,6 +61,20 @@ const CATEGORIES: { id: CodexCategory; label: string; icon: typeof Skull }[] = [
   { id: 'rules', label: '修行法典', icon: Compass },
 ];
 
+const SHELL_STONE_WEIGHT_MEAN =
+  BOSS_SHELLS.reduce((sum, sh) => sum + sh.baseAffixStones, 0) / BOSS_SHELLS.length;
+
+/** 躯壳深度权重展示：1 → ×1，0.25 → ×0.25 */
+function formatStoneWeight(weight: number): string {
+  const v = weight / SHELL_STONE_WEIGHT_MEAN;
+  return v.toFixed(2).replace(/\.?0+$/, '');
+}
+
+/** 小数颗数展示：0.4 → 0.4，1 → 1，2.5 → 2.5 */
+function formatStoneAmount(amount: number): string {
+  return amount.toFixed(2).replace(/\.?0+$/, '');
+}
+
 export function CompendiumModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const { meta, mercs, settings } = useGameStore();
   const [category, setCategory] = useState<CodexCategory>('boss');
@@ -88,7 +103,12 @@ export function CompendiumModal({ open, onClose }: { open: boolean; onClose: () 
       if (affixFilter !== 'all' && affixFilter !== 'innate' && a.tierGroup !== affixFilter) {
         return false;
       }
-      if (q && !a.name.toLowerCase().includes(q) && !a.description.toLowerCase().includes(q)) {
+      if (
+        q &&
+        !a.name.toLowerCase().includes(q) &&
+        !a.description.toLowerCase().includes(q) &&
+        !(a.recommendedFor ?? '').toLowerCase().includes(q)
+      ) {
         return false;
       }
       return true;
@@ -272,6 +292,11 @@ export function CompendiumModal({ open, onClose }: { open: boolean; onClose: () 
                         </div>
                       </div>
 
+                      <div className="text-xs font-mono-num text-[#fbbf24]">
+                        词缀石：每重躯壳期望 {formatStoneAmount(t.stonePerShell)} 颗 · 全通约{' '}
+                        {formatStoneAmount(t.stonePerShell * BOSS_SHELLS.length)} 颗
+                      </div>
+
                       {/* Drop Rates Row */}
                       <div className="flex items-center gap-2 flex-wrap text-xs font-mono-num">
                         <span className="font-bold text-[#f8fafc]">
@@ -322,6 +347,9 @@ export function CompendiumModal({ open, onClose }: { open: boolean; onClose: () 
                 <h3 className="font-display text-sm font-black tracking-wider text-[#7dd3fc] px-0.5">
                   十重通用躯壳结构与破壳掉落
                 </h3>
+                <p className="text-[11px] text-[#94a3b8] leading-relaxed px-0.5">
+                  越深层的躯壳道纹结晶越厚：下表为躯壳深度权重，实际掉落 = 本劫每重期望 × 权重。
+                </p>
                 <div className="rounded-xl bg-[#101322] border border-[#2e3552] divide-y divide-white/8">
                   {BOSS_SHELLS.map((sh) => (
                     <div key={sh.phase} className="px-3.5 py-2.5 space-y-1">
@@ -329,7 +357,9 @@ export function CompendiumModal({ open, onClose }: { open: boolean; onClose: () 
                         <span className="font-bold text-[#f1f5f9]">{sh.name}</span>
                         <span className="font-mono-num text-[#94a3b8] shrink-0">
                           占总血 {(sh.hpShare * 100).toFixed(sh.hpShare < 0.001 ? 2 : 1)}% ·{' '}
-                          <span className="text-[#fbbf24] font-bold">+{sh.baseAffixStones} 词缀石</span>
+                          <span className="text-[#fbbf24] font-bold">
+                            词缀石 ×{formatStoneWeight(sh.baseAffixStones)}
+                          </span>
                         </span>
                       </div>
                       {sh.firstBreakNote && (
@@ -378,6 +408,14 @@ export function CompendiumModal({ open, onClose }: { open: boolean; onClose: () 
                     当前已受【七彩神石 Lv.{luckLv}】加成（极品/仙品权重 +{luckLv * 8}%）
                   </p>
                 )}
+                <div className="border-t border-white/8 pt-2 space-y-1">
+                  <p className="text-xs text-[#fbbf24] font-semibold">道纹淬炼（必定提升一阶）</p>
+                  <p className="text-[11px] text-[#94a3b8] leading-relaxed">
+                    凡→良 {AFFIX_QUENCH_COSTS.white} 颗 · 良→上 {AFFIX_QUENCH_COSTS.green} 颗 · 上→极{' '}
+                    {AFFIX_QUENCH_COSTS.blue} 颗 · 极→仙 {AFFIX_QUENCH_COSTS.purple} 颗；不改变词缀种类，
+                    仙品为上限。
+                  </p>
+                </div>
               </div>
 
               {/* Search + SubFilter */}
@@ -392,6 +430,10 @@ export function CompendiumModal({ open, onClose }: { open: boolean; onClose: () 
                     className="w-full min-h-[44px] pl-9 pr-3 py-2 rounded-lg bg-[#0d101b] border border-[#2e3552] text-sm text-[#f1f5f9] placeholder:text-[#64748b] focus:outline-none focus:border-[#38bdf8]"
                   />
                 </div>
+
+                <p className="text-[11px] text-[#94a3b8] leading-relaxed px-1">
+                  标签代表类型而非绝对强度：下等=基础数值，中等=机制/资源，上等=跨护法联动。带「专属/推荐」的词缀请优先放在提示的槽位。
+                </p>
 
                 <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar p-1.5 bg-[#101322] border border-[#2e3552] rounded-xl">
                   {(
@@ -452,6 +494,11 @@ export function CompendiumModal({ open, onClose }: { open: boolean; onClose: () 
                         <p className="text-xs text-[#cbd5e1] leading-relaxed">
                           {a.description.replace('{val}', `[${rangeText}]`)}
                         </p>
+                        {a.recommendedFor && (
+                          <span className="inline-flex items-center rounded-md border border-[#38bdf8]/35 bg-[#0c4a6e]/30 px-1.5 py-0.5 text-[10.5px] font-semibold text-[#7dd3fc]">
+                            {a.recommendedFor}
+                          </span>
+                        )}
                       </div>
                     );
                   })}
@@ -796,7 +843,7 @@ export function CompendiumModal({ open, onClose }: { open: boolean; onClose: () 
                 </div>
                 <div className="rounded-xl bg-[#101322] border border-[#f59e0b]/35 p-3 text-xs text-[#cbd5e1] leading-relaxed">
                   <div className="font-bold text-[#fef08a] text-[13px] mb-1">2. 无限核弹流</div>
-                  <RichLoreText text="剑侍与主角攻击每 15 次缩减【雷火机神】1 秒冷却，搭配【雷火装填】【重火协同】与★【歼星连射】实现核弹加特林。" />
+                  <RichLoreText text="剑侍与主角攻击每 15 次缩减【雷火机神】0.4 秒冷却（所有充能来源合计封顶每秒 1 秒冷却），搭配【雷火装填】【重火协同】与★【歼星连射】稳定压缩重炮开火间隔。" />
                 </div>
                 <div className="rounded-xl bg-[#101322] border border-[#f43f5e]/35 p-3 text-xs text-[#cbd5e1] leading-relaxed">
                   <div className="font-bold text-[#fecdd3] text-[13px] mb-1">3. 千级登神流</div>
@@ -930,8 +977,7 @@ export function CompendiumModal({ open, onClose }: { open: boolean; onClose: () 
                     500 倍时触发心魔瓶颈（点击成长降至 20%）；机关傀儡每次自动叩击享 25% 顿悟成长。
                   </li>
                   <li>
-                    · <span className="text-[#7dd3fc] font-semibold">25次/秒攻速极限与性能护航</span>：傀儡、分身残影与五位护法的实际频率上限均为{' '}
-                    25 次/秒 (0.04s)，超出部分 1:1 等比例转为攻击伤害；同屏飘字/波纹/横幅均设并发上限，非首次里程碑通关采用底栏无感结算，不打断洗练与强化操作。
+                    · <span className="text-[#7dd3fc] font-semibold">25次/秒攻击间隔上限与性能护航</span>：傀儡、分身残影与五位护法的<span className="font-semibold text-[#e2e8f0]">间隔驱动攻击</span>上限均为 25 次/秒 (0.04s)，超出部分 1:1 等比例转为单次攻击伤害；单次攻击可拆多段命中，点击联动与机神充能会追加攻击事件，因此“命中事件/秒”可高于 25。同屏飘字/波纹/横幅均设并发上限，非首次里程碑通关采用底栏无感结算，不打断洗练与强化操作。
                   </li>
                   <li>
                     · <span className="text-[#fda4af] font-semibold">真神轮回 (NG+)</span>：每次击败终焉劫(劫十)，使

@@ -1,3 +1,4 @@
+import { AFFIX_QUENCH_COSTS } from './constants';
 import type {
   AffixConfig,
   AffixId,
@@ -98,9 +99,9 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     id: 'af_t1_flat_lv',
     name: '强体',
     tierGroup: '下等',
-    baseValue: 20,
+    baseValue: 8,
     unitKind: 'pct',
-    description: '该佣兵每升 25 有效级，自身伤害额外加算 {val}%。',
+    description: '该佣兵每升 25 有效级，自身伤害额外加算 {val}%（单护法合计上限 +300%）。',
   },
   af_t1_early: {
     id: 'af_t1_early',
@@ -109,6 +110,7 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     baseValue: 60,
     unitKind: 'pct',
     description: '对第 1~5 重躯壳的 BOSS 造成伤害提升 {val}%。',
+    recommendedFor: '前 5 重生效',
   },
   af_t1_late: {
     id: 'af_t1_late',
@@ -117,6 +119,7 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     baseValue: 80,
     unitKind: 'pct',
     description: '对第 6~10 重躯壳的 BOSS 造成伤害提升 {val}%。',
+    recommendedFor: '后 5 重生效',
   },
   af_t1_hero_a: {
     id: 'af_t1_hero_a',
@@ -174,7 +177,7 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     tierGroup: '中等',
     baseValue: 4,
     unitKind: 'pct',
-    description: '每次攻击有 {val}% 概率直接连打 3 次（不套娃）。',
+    description: '每次攻击有 {val}% 概率额外追加 3 次全额攻击（不套娃）。',
   },
   af_t2_stack: {
     id: 'af_t2_stack',
@@ -206,7 +209,7 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     tierGroup: '中等',
     baseValue: 5,
     unitKind: 'pct',
-    description: '每次攻击有 {val}% 概率爆出相当于当前秒伤 200% 的灵石。',
+    description: '每次攻击有 {val}% 概率爆出相当于当前秒伤 200% 的灵石（每秒最多 5 次全额；超出的前 5 次按 20% 折算，再超出丢弃）。',
   },
   af_t2_cheap: {
     id: 'af_t2_cheap',
@@ -222,7 +225,7 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     tierGroup: '中等',
     baseValue: 3,
     unitKind: 'pct',
-    description: '破壳额外多掉 1 颗词缀石概率 +{val}%（满 100% 必掉）。',
+    description: '破壳词缀石掉落 +{val}%（全队合计上限 +100%）。',
   },
   af_t2_mana_h: {
     id: 'af_t2_mana_h',
@@ -252,9 +255,12 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     id: 'af_t2_century',
     name: '百炼成仙',
     tierGroup: '中等',
-    baseValue: 12,
+    baseValue: 15,
     unitKind: 'pct',
-    description: '每达整百有效级（100..1000），自身伤害复利 ×(1+{val}%)（单护法整百合计上限 +120%）。',
+    description:
+      '每达整百有效级（100..1000），自身伤害线性 +{val}%（单护法整百比率合计上限 +90%，Lv.1000 最多 ×10；品质按平方根缩放，且不吃 5 号位与古神瞳放大）。',
+    tierScaling: 'sqrt',
+    recommendedFor: '雷火机神推荐',
   },
 
   // ===== 上等 · 跨佣兵点名联动词缀 (14) =====
@@ -264,7 +270,8 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     tierGroup: '上等',
     baseValue: 1.5,
     unitKind: 'pct',
-    description: '1号位【青冥剑侍】每有 10 有效级，自身伤害 +{val}%。',
+    description: '仅 1号位【青冥剑侍】生效：每有 10 有效级，自身伤害 +{val}%（合计上限 +300%）。',
+    recommendedFor: '青冥剑侍专属',
   },
   af_t3_tent_s: {
     id: 'af_t3_tent_s',
@@ -272,7 +279,8 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     tierGroup: '上等',
     baseValue: 2.0,
     unitKind: 'pct',
-    description: '2号位【深渊触母】每有 10 有效级，自身与毒伤 +{val}%。',
+    description: '仅 2号位【深渊触母】生效：每有 10 有效级，自身与毒伤 +{val}%（合计上限 +300%）。',
+    recommendedFor: '深渊触母专属',
   },
   af_t3_can_s: {
     id: 'af_t3_can_s',
@@ -280,7 +288,8 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     tierGroup: '上等',
     baseValue: 2.5,
     unitKind: 'pct',
-    description: '3号位【雷火机神】每有 10 有效级，自身爆伤 +{val}%。',
+    description: '仅 3号位【雷火机神】生效：每有 10 有效级，自身爆伤 +{val}%（合计上限 +300%）。',
+    recommendedFor: '雷火机神专属',
   },
   af_t3_arr_s: {
     id: 'af_t3_arr_s',
@@ -288,15 +297,16 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     tierGroup: '上等',
     baseValue: 3.0,
     unitKind: 'pct',
-    description: '4号位【天机阵尊】每有 10 有效级，全队佣兵基础伤 +{val}%。',
+    description: '仅 4号位【天机阵尊】生效：每有 10 有效级，全队佣兵基础伤 +{val}%（全队合计上限 +300%）。',
+    recommendedFor: '天机阵尊专属',
   },
   af_t3_total_l: {
     id: 'af_t3_total_l',
     name: '万仙来朝',
     tierGroup: '上等',
-    baseValue: 8,
+    baseValue: 3,
     unitKind: 'pct',
-    description: '全队总有效等级每有 50 级，本佣兵伤害提升 {val}%。',
+    description: '全队总有效等级每有 50 级，本佣兵伤害提升 {val}%（本词缀合计上限 +200%）。',
   },
   af_t3_click_t: {
     id: 'af_t3_click_t',
@@ -318,9 +328,10 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     id: 'af_t3_cd_can',
     name: '雷火装填',
     tierGroup: '上等',
-    baseValue: 0.12,
+    baseValue: 0.02,
     unitKind: 'sec',
-    description: '每次攻击使 3号位【雷火机神】当前冷却缩短 {val} 秒。',
+    description: '每次攻击使 3号位【雷火机神】当前冷却缩短 {val} 秒（机神自身攻击不自我装填，每秒充能总量受机神基础攻速上限约束）。',
+    recommendedFor: '青冥剑侍/深渊触母推荐',
   },
   af_t3_hero_ln: {
     id: 'af_t3_hero_ln',
@@ -328,7 +339,7 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     tierGroup: '上等',
     baseValue: 25,
     unitKind: 'pct',
-    description: '将主角点击基础战力的 {val}% 直接附加到每次攻击上。',
+    description: '将主角点击基础战力的 {val}% 直接附加到每次攻击上（同样享受 25/s 溢出折算）。',
   },
   af_t3_buff_h: {
     id: 'af_t3_buff_h',
@@ -342,9 +353,10 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     id: 'af_t3_adj_dmg',
     name: '左右逢源',
     tierGroup: '上等',
-    baseValue: 30,
+    baseValue: 12,
     unitKind: 'pct',
-    description: '使自身相邻两侧栏位佣兵最终伤害独立提升 {val}%。',
+    description: '使自身以外其他 4 名佣兵最终伤害独立提升 {val}%（合计上限 +300%）。',
+    recommendedFor: '深渊触母/天机阵尊推荐',
   },
   af_t3_team_sp: {
     id: 'af_t3_team_sp',
@@ -360,15 +372,17 @@ export const AFFIXES: Record<AffixId, AffixConfig> = {
     tierGroup: '上等',
     baseValue: 0.5,
     unitKind: 'pct',
-    description: 'BOSS 每有 10 层腐蚀毒，本佣兵直伤 +{val}%（上限 1200%）。',
+    description: '仅 2号位【深渊触母】生效：BOSS 每有 10 层腐蚀毒，本佣兵直伤 +{val}%（上限 +600%）。',
+    recommendedFor: '深渊触母专属',
   },
   af_t3_lone: {
     id: 'af_t3_lone',
     name: '唯我独尊',
     tierGroup: '上等',
-    baseValue: 80,
+    baseValue: 30,
     unitKind: 'pct',
-    description: '其他 4 人伤害 ×0.75，但本佣兵最终伤害独立 ×(1+{val}%)。',
+    description: '本佣兵最终伤害独立 ×(1+{val}%)，其他 4 人伤害 ×0.85。',
+    recommendedFor: '雷火机神推荐',
   },
 };
 
@@ -436,9 +450,12 @@ export const INNATE_AFFIX_LIST: InnateAffixConfig[] = Object.values(INNATE_AFFIX
 
 /**
  * Three-way multiplier for level affix slots (0..9):
- * 1. Slot 5 unlocked -> *1.5
+ * 1. Slot 5 unlocked -> *1.5（仅非复利词缀；复利词缀见 tierScaling）
  * 2. Merc innate sp_affix_boost -> *2.0
- * 3. Relic rel_m_first_affix (slots 0..3 / Lv.10~Lv.100) -> *(1 + 0.12 * L)
+ * 3. Relic rel_m_first_affix (slots 0..3 / Lv.10~Lv.100) -> *(1 + 0.10 * L)
+ *
+ * `tierScaling: 'sqrt'` 的复利词缀把品质倍率开平方，避免仙品 7× 在指数乘区里滚成
+ * 数千倍，同时保留品质越高越强的线性感知。
  */
 export function getAffixEffectiveValue(
   inst: AffixInstance,
@@ -450,10 +467,11 @@ export function getAffixEffectiveValue(
   const cfg = AFFIXES[inst.id];
   const tierMeta = AFFIX_TIER_META[inst.tier];
   if (!cfg || !tierMeta) return 0;
-  const tierMult = tierMeta.mult;
-  const slot5Boost = isSlot5Unlocked ? 1.5 : 1.0;
+  const isCompound = cfg.tierScaling === 'sqrt';
+  const tierMult = isCompound ? Math.sqrt(tierMeta.mult) : tierMeta.mult;
+  const slot5Boost = isSlot5Unlocked && !isCompound ? 1.5 : 1.0;
   const innateBoost = hasInnateBoost ? 2.0 : 1.0;
-  const relicSlotBoost = slotIdx <= 3 ? 1 + 0.12 * firstAffixRelicLv : 1.0;
+  const relicSlotBoost = !isCompound && slotIdx <= 3 ? 1 + 0.1 * firstAffixRelicLv : 1.0;
   return cfg.baseValue * tierMult * slot5Boost * innateBoost * relicSlotBoost;
 }
 
@@ -530,6 +548,18 @@ export function rollAffixTier(affixLuckRelicLv: number, forceHighTier = false): 
 }
 
 export const AFFIX_TIER_ORDER: AffixTier[] = ['white', 'green', 'blue', 'purple', 'gold'];
+
+/** 淬炼后的下一阶；仙品返回 null */
+export function getNextAffixTier(tier: AffixTier): AffixTier | null {
+  const idx = AFFIX_TIER_ORDER.indexOf(tier);
+  if (idx < 0 || idx >= AFFIX_TIER_ORDER.length - 1) return null;
+  return AFFIX_TIER_ORDER[idx + 1];
+}
+
+/** 【道纹淬炼】消耗（颗）；仙品返回 null */
+export function getQuenchCost(tier: AffixTier): number | null {
+  return AFFIX_QUENCH_COSTS[tier] ?? null;
+}
 
 export function getAffixTierRates(affixLuckRelicLv: number): {
   tier: AffixTier;

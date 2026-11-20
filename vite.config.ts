@@ -21,23 +21,22 @@ function resolveBasePath(command: 'serve' | 'build'): string {
   return './';
 }
 
-export default defineConfig(({command}) => {
-  const basePath = resolveBasePath(command);
+export default defineConfig(({command, mode}) => {
+  const isMiniGame = mode === 'minigame';
+  // 小游戏容器使用相对路径；PWA Service Worker 在小游戏内不需要，反而可能干扰平台缓存。
+  const basePath = isMiniGame ? './' : resolveBasePath(command);
   return {
     base: basePath,
     plugins: [
       react(),
       tailwindcss(),
-      VitePWA({
+      ...(isMiniGame ? [] : [VitePWA({
         registerType: 'autoUpdate',
         includeAssets: [
           'apple-touch-icon.png',
           'pwa-192x192.png',
           'pwa-512x512.png',
           'pwa-maskable-512x512.png',
-          'taptap/icon-1x1.jpg',
-          'taptap/cover-16x9.jpg',
-          'taptap/poster-3x4.jpg',
         ],
         manifest: {
           id: basePath,
@@ -73,13 +72,14 @@ export default defineConfig(({command}) => {
         },
         workbox: {
           globPatterns: ['**/*.{js,css,html,ico,png,jpg,svg,woff,woff2}'],
-          globIgnores: ['**/aistudio/**'],
+          // 商店图集仅用于 OG 分享与上架物料，不进离线缓存（省约 1.4MB 首装流量）
+          globIgnores: ['**/aistudio/**', 'taptap/**'],
         },
         devOptions: {
           enabled: true,
           type: 'module',
         },
-      }),
+      })]),
     ],
     resolve: {
       alias: {

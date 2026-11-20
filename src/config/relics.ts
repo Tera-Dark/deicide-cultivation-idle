@@ -175,7 +175,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 12,
     costGrowth: 1.18,
-    description: '【护法基础池】全队 1~5 号位护法基础伤害加算 +(3% × 总等级)（与专精遗物同池叠加）。',
+    description: '【护法基础池】全队 1~5 号位护法基础伤害加算 +(2.5% × 总等级)（与专精遗物同池叠加）。',
   },
   {
     id: 'rel_c_mana_regen',
@@ -217,7 +217,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 28,
     costGrowth: 1.2,
-    description: '【护法基础池】1号位【青冥剑侍】基础池额外加算 +(5% × 总等级)。',
+    description: '【护法基础池】1号位【青冥剑侍】基础池额外加算 +(7% × 总等级)。',
   },
   {
     id: 'rel_r_tentacle',
@@ -227,7 +227,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 28,
     costGrowth: 1.2,
-    description: '【护法基础池】2号位【深渊触母】直伤与每秒毒伤基础池额外加算 +(5% × 总等级)。',
+    description: '【护法基础池】2号位【深渊触母】直伤与每秒毒伤基础池额外加算 +(7% × 总等级)。',
   },
   {
     id: 'rel_r_cannon_dmg',
@@ -237,7 +237,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 32,
     costGrowth: 1.2,
-    description: '【护法基础池】3号位【雷火机神】基础池额外加算 +(5% × 总等级)。',
+    description: '【护法基础池】3号位【雷火机神】基础池额外加算 +(4% × 总等级)。',
   },
   {
     id: 'rel_r_thunder',
@@ -289,7 +289,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 120,
     costGrowth: 1.22,
-    description: '4号位【天机阵尊】1~3号位伤害光环与灵石加成 ×(1 + 0.03 × 总等级)。',
+    description: '4号位【天机阵尊】1~3号位伤害光环与灵石加成 ×(1 + 0.02 × 总等级)。',
   },
   {
     id: 'rel_r_skill_cd',
@@ -371,7 +371,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 600,
     costGrowth: 1.26,
-    description: '击破躯壳时额外掉词缀石期待 +(4% × 总等级，每满100%必多掉1颗)。',
+    description: '击破躯壳时词缀石掉落 +(4% × 总等级)，上限 +150%。',
   },
   {
     id: 'rel_e_free_roll',
@@ -381,7 +381,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: 6,
     baseCost: 1200,
     costGrowth: 1.75,
-    description: '洗练词缀或本命神通有 5% × 总等级 概率免材料（特限劫印≤6，最高 80%）。',
+    description: '单个道纹槽位洗练有 5% × 总等级 概率免材料（上限 50%，批量洗练不享受）。',
   },
   {
     id: 'rel_e_affix_luck',
@@ -431,7 +431,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: 30,
     baseCost: 1000,
     costGrowth: 1.26,
-    description: '【战术终伤池】灵石每多 1 数量级 +(0.5% × 总等级)，且破壳返还 0.4%×总级（上限8%）灵石（劫印≤30）。',
+    description: '【战术终伤池】灵石每多 1 数量级 +(0.5% × 总等级，战术池封顶 +250%)，且破壳返还 0.4%×总级（上限8%）灵石（劫印≤30）。',
   },
 
   // ==================== 五、仙 (7件 · 含高阶神晶与掉宝增幅) ====================
@@ -463,7 +463,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 3000,
     costGrowth: 1.26,
-    description: '【终局复利池】全队最终总伤害复利 ×(1.032 ^ 神晶级) × (1.008 ^ 劫印级)。',
+    description: '【终局复利池】全队最终总伤害复利 ×(1.025 ^ 神晶级) × (1.006 ^ 劫印级)。',
   },
   {
     id: 'rel_e_inf_crystal',
@@ -515,7 +515,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 15000,
     costGrowth: 2.1,
-    description: '全队前 4 个等级词缀槽 (Lv.10~Lv.100) 数值效果 ×(1 + 0.12 × 总等级)。',
+    description: '全队前 4 个等级词缀槽 (Lv.10~Lv.100) 数值效果 ×(1 + 0.10 × 总等级)；复利词缀（百炼成仙）不吃此放大。',
   },
   {
     id: 'rel_m_auto_skill',
@@ -555,7 +555,7 @@ export const RELICS: RelicConfig[] = [
     maxDropLevel: null,
     baseCost: 12000,
     costGrowth: 1.3,
-    description: '【终局复利池】真神终伤复利 ×(1.09 ^ 神晶级) × (1.022 ^ 劫印级)。',
+    description: '【终局复利池】真神终伤复利 ×(1.07 ^ 神晶级) × (1.015 ^ 劫印级)。',
   },
   {
     id: 'rel_m_god_crystal',

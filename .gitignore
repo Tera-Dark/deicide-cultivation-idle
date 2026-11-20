@@ -1,6 +1,7 @@
 node_modules/
 build/
 dist/
+dist-minigame/
 dev-dist/
 coverage/
 .aistudio/
@@ -11,7 +12,10 @@ Thumbs.db
 *.local
 .env*
 !.env.example
+!.env.minigame
 .vscode/*
 !.vscode/extensions.json
 .idea/
 
+
+.tmp-build/

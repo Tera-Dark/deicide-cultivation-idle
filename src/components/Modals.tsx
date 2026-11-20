@@ -1,5 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import Decimal from 'break_infinity.js';
+import { AdRewardButton } from './AdRewardButton';
+import {
+  adsAvailableForUi,
+  isTapMiniGame,
+  requestAddToDesktop,
+  showInterstitialAd,
+  showRewardedAd,
+} from '../platform/tap';
 import {
   Activity,
   ArrowDown,
@@ -10,6 +18,9 @@ import {
   Check,
   CheckCircle2,
   Clock,
+  Cloud,
+  CloudDownload,
+  CloudUpload,
   Copy,
   Crown,
   Dices,
@@ -45,6 +56,8 @@ import {
   formatAffixDescription,
   formatAffixShortBadgeValue,
   getAffixEffectiveValue,
+  getNextAffixTier,
+  getQuenchCost,
 } from '../config/affixes';
 import { ARCHETYPES } from '../config/archetypes';
 import { TRIBULATIONS } from '../config/bosses';
@@ -53,12 +66,14 @@ import { MERC_TYPOGRAPHY, RichLoreText } from '../config/highlights';
 import { RELIC_TIER_META, getTribulationEffectiveDropOdds } from '../config/relics';
 import {
   evaluateSpeedrunRank,
+  getBatchRerollCost,
   getBossTotalHp,
   getEffectiveLevel,
   getGlobalMult,
   getHeroStats,
   getMercenaryComputedStats,
   getRelicTotalLv,
+  getSingleRerollCost,
   getTeamCombatDpsBreakdown,
   getTotalRelicLevels,
   isSlot5Active,
@@ -244,13 +259,18 @@ export function CompliancePolicyModal({
 
           <section className="rounded-xl bg-[#101322] border border-[#2e3552] p-3.5 space-y-1.5">
             <div className="font-display font-bold text-[#7dd3fc]">
-              二、纯单机离线与隐私保护声明
+              二、登录、云存档、广告与隐私保护说明
             </div>
             <p>
-              《弑神道果：万亿亿劫》严格遵循最小必要原则：<span className="text-[#a7f3d0] font-semibold">不联网、无账号注册、无广告跟踪、不采集亦不上传任何个人身份信息、通讯录、定位、相册或设备隐私标识符</span>。
+              本作接入 <span className="text-[#a7f3d0] font-semibold">TapTap 小游戏登录与云存档</span>，用于识别账号、跨设备同步进度。
+              广告由 <span className="text-[#fde68a] font-semibold">TapADN（聚合穿山甲 / 优量汇）</span> 提供；激励视频仅在您主动点击「看广告」时播放，插屏仅在胜利结算后的自然断点展示。广告可能收集设备标识符、网络信息用于投放、频次控制与反作弊。
             </p>
             <p>
-              所有境界、护法、词缀、遗物与设置进度均仅保存于您当前浏览器的本地存储（localStorage）中。您可通过设置面板随时使用「复制存档串」或「下载 .json 备份文件」自行管理与迁移存档；清除浏览器缓存或执行「硬重置存档」将同步删除本地进度。
+              我们遵循最小必要原则，<span className="text-[#a7f3d0] font-semibold">不采集通讯录、定位、相册、麦克风等敏感信息</span>，也不会将您的游戏进度出售给第三方。
+              您可在《隐私政策》中查看第三方 SDK 清单、数据用途、保存期限、退出个性化广告与删除数据的方式。
+            </p>
+            <p>
+              进度默认保存于本机，并在登录 TapTap 后同步至云存档；您可在设置面板手动上传 / 恢复云存档，或使用「复制存档串」「下载 .json 备份」自行迁移。清除本地缓存或执行「硬重置存档」会删除本机进度。
             </p>
           </section>
 
@@ -258,9 +278,9 @@ export function CompliancePolicyModal({
             <div className="font-display font-bold text-[#e2e8f0]">
               三、版本与授权信息
             </div>
-            <p>当前版本：v3.6.0（离线直玩 · 支持主屏幕安装）</p>
+            <p>当前版本：v3.11.0（TapTap 小游戏 · 云存档 · 激励广告）</p>
             <p className="text-[#94a3b8]">
-              游戏内不存在真实货币充值与随机付费抽卡机制，所有词缀与遗物均通过局内玩法免费获取。
+              游戏内不存在真实货币充值与随机付费抽卡机制，所有词缀与遗物均通过局内玩法免费获取；广告奖励均为可选加速，不影响核心玩法。
             </p>
           </section>
         </div>
@@ -645,7 +665,7 @@ export function BuildGuideModal({ open, onClose }: { open: boolean; onClose: () 
               </h3>
             </div>
             <p className="text-xs text-[#cbd5e1] leading-[1.75]">
-              <RichLoreText text="【雷火机神】自带“剑侍与主角每攻 15 次缩减 1 秒冷却”，给【青冥剑侍】洗【雷火装填】、给机神洗【重火协同】与本命神通 ★【歼星连射】，让重炮化为连射毁灭加特林，对第 6~10 重核心更享 ×3 倍穿透加成！" />
+              <RichLoreText text="【雷火机神】自带“剑侍与主角每攻 15 次缩减 0.4 秒冷却”，所有充能来源合计封顶每秒 1 秒冷却；给【青冥剑侍】洗【雷火装填】、给机神洗【重火协同】与本命神通 ★【歼星连射】，稳定压缩重炮开火间隔，对第 6~10 重核心更享 ×2.25 倍穿透加成！" />
             </p>
           </div>
 
@@ -692,6 +712,13 @@ export function VictoryModal() {
 
   if (!victorySummary) return null;
 
+  const handleClose = () => {
+    const shouldInterstitial =
+      !meta.autoRepeatEnabled && victorySummary.rank !== 'SSS';
+    clearVictorySummary();
+    if (shouldInterstitial) void showInterstitialAd();
+  };
+
   const currentIdx = TRIBULATIONS.findIndex((t) => t.id === victorySummary.tribulationId);
   const nextTrib =
     currentIdx >= 0 && currentIdx < TRIBULATIONS.length - 1
@@ -725,7 +752,7 @@ export function VictoryModal() {
           </div>
           <button
             type="button"
-            onClick={clearVictorySummary}
+            onClick={handleClose}
             className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-lg text-[#94a3b8] hover:text-white hover:bg-white/10 cursor-pointer"
             aria-label="关闭"
           >
@@ -928,8 +955,24 @@ export function VictoryModal() {
 }
 
 export function OfflineReportModal() {
-  const { meta, settings, offlineSummary, clearOfflineSummary } = useGameStore();
+  const {
+    meta,
+    settings,
+    offlineSummary,
+    clearOfflineSummary,
+    offlineAdBonusClaimed,
+    claimOfflineAdBonus,
+  } = useGameStore();
+  const [adLoading, setAdLoading] = useState(false);
   if (!offlineSummary || !meta.hasSeenIntro) return null;
+
+  const handleAdDouble = async () => {
+    if (adLoading || offlineAdBonusClaimed) return;
+    setAdLoading(true);
+    const ok = await showRewardedAd('offline_double');
+    setAdLoading(false);
+    if (ok) claimOfflineAdBonus();
+  };
 
   const crystalsTotal = toDecimal(offlineSummary.crystalsGained).add(
     toDecimal(offlineSummary.overflowCrystals)
@@ -1011,6 +1054,23 @@ export function OfflineReportModal() {
             </span>
           </div>
         </div>
+
+        {adsAvailableForUi() && (
+        <div className="rounded-xl bg-[#f59e0b]/10 border border-[#fbbf24]/40 p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-bold text-[#fef08a]">广告加成 · 离线收益翻倍</span>
+            <span className="text-[10px] text-[#94a3b8]">遗物掉落不翻倍</span>
+          </div>
+          <AdRewardButton
+            fullWidth
+            label={offlineAdBonusClaimed ? '本次翻倍已领取' : '看广告，离线收益 ×2'}
+            loading={adLoading}
+            disabled={offlineAdBonusClaimed}
+            onClick={() => void handleAdDouble()}
+            tone="amber"
+          />
+        </div>
+        )}
 
         {offlineSummary.unlockedNextOrder !== null && (
           <div className="rounded-xl bg-[#10b981]/14 border border-[#34d399]/45 px-3.5 py-2.5 text-xs font-bold text-[#6ee7b7]">
@@ -1367,6 +1427,15 @@ export function HardResetConfirmModal({
   );
 }
 
+function formatSavedAt(ts: number): string {
+  if (!ts) return '未知时间';
+  try {
+    return new Date(ts).toLocaleString('zh-CN', { hour12: false });
+  } catch {
+    return '未知时间';
+  }
+}
+
 export function SettingsModal({ open, onClose }: { open: boolean; onClose: () => void }) {
   const {
     settings,
@@ -1382,9 +1451,19 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
     exportSaveString,
     importSaveString,
     hardResetAll,
+    cloudAvailable,
+    lastCloudSavedAt,
+    syncCloudNow,
+    restoreFromCloud,
   } = useGameStore();
 
   const [saveText, setSaveText] = useState('');
+  const [cloudBusy, setCloudBusy] = useState(false);
+  const [cloudNotice, setCloudNotice] = useState<string | null>(null);
+  const [cloudConflict, setCloudConflict] = useState<{
+    cloudSavedAt: number;
+    localSavedAt: number;
+  } | null>(null);
   const [copied, setCopied] = useState(false);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
@@ -1406,6 +1485,30 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
   if (!open) return null;
 
   const secondsSinceSave = Math.max(0, Math.floor((nowTick - lastSavedAt) / 1000));
+
+  const handleRestoreCloud = async (force: boolean) => {
+    if (!cloudAvailable || cloudBusy) return;
+    setCloudBusy(true);
+    const res = await restoreFromCloud(force);
+    setCloudBusy(false);
+    if (res.ok) {
+      setCloudConflict(null);
+      setCloudNotice('已从云端恢复');
+      return;
+    }
+    if (res.reason === 'older') {
+      setCloudNotice(null);
+      setCloudConflict({
+        cloudSavedAt: res.cloudSavedAt ?? 0,
+        localSavedAt: res.localSavedAt ?? 0,
+      });
+      return;
+    }
+    setCloudConflict(null);
+    setCloudNotice(
+      res.reason === 'empty' ? '未找到可恢复的云存档' : '云存档解析失败，未覆盖本地'
+    );
+  };
 
   const handleExport = () => {
     const str = exportSaveString();
@@ -1434,7 +1537,7 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
     try {
       const backupObj = {
         game: '弑神道果：万亿亿劫',
-        version: '3.6.0',
+        version: '3.11.0',
         exportedAt: new Date().toISOString(),
         payload,
       };
@@ -1769,23 +1872,122 @@ export function SettingsModal({ open, onClose }: { open: boolean; onClose: () =>
               {importError && <p className="text-xs text-[#fda4af]">{importError}</p>}
             </div>
 
+            {/* TapTap cloud save & desktop shortcut */}
+            <div className="rounded-xl bg-[#101322] border border-[#22d3ee]/35 px-3.5 py-3 space-y-2">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <span className="inline-flex items-center gap-1.5 text-[13px] font-semibold text-[#f4f1ea]">
+                  <Cloud className="w-4 h-4 text-[#22d3ee]" />
+                  <span>TapTap 云存档</span>
+                </span>
+                <span className="text-[10px] font-semibold text-[#94a3b8]">
+                  {cloudAvailable ? '已连接' : isTapMiniGame() ? '未授权 / 不可用' : '浏览器本地模式'}
+                </span>
+              </div>
+              <p className="text-[11px] text-[#94a3b8] leading-relaxed">
+                {cloudAvailable
+                  ? `登录 TapTap 后自动同步。上次云上传：${
+                      lastCloudSavedAt
+                        ? new Date(lastCloudSavedAt).toLocaleTimeString()
+                        : '自动同步已开启'
+                    }`
+                  : isTapMiniGame()
+                    ? '当前未完成平台隐私授权，或容器未提供云存档能力；进度仅保存在本机。'
+                    : '当前为浏览器 / PWA 环境，仅保存在本机；进入 TapTap 小游戏后自动启用云存档。'}
+              </p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={!cloudAvailable || cloudBusy}
+                  onClick={async () => {
+                    if (!cloudAvailable || cloudBusy) return;
+                    setCloudBusy(true);
+                    const ok = await syncCloudNow();
+                    setCloudBusy(false);
+                    setCloudNotice(ok ? '云存档已上传' : '云存档上传失败');
+                  }}
+                  className="min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#06b6d4]/16 border border-[#22d3ee]/45 text-[#cffafe] hover:bg-[#06b6d4]/28 disabled:opacity-40 cursor-pointer"
+                >
+                  <CloudUpload className="w-3.5 h-3.5" />
+                  <span>{cloudBusy ? '同步中…' : '上传云存档'}</span>
+                </button>
+                <button
+                  type="button"
+                  disabled={!cloudAvailable || cloudBusy}
+                  onClick={() => void handleRestoreCloud(false)}
+                  className="min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#181d31] border border-[#384166] text-[#cbd5e1] hover:text-white hover:border-[#38bdf8]/50 disabled:opacity-40 cursor-pointer"
+                >
+                  <CloudDownload className="w-3.5 h-3.5" />
+                  <span>从云端恢复</span>
+                </button>
+              </div>
+              {cloudConflict && (
+                <div className="rounded-lg border border-[#f59e0b]/55 bg-[#1a1608] p-2.5 space-y-2">
+                  <p className="text-[11px] leading-relaxed text-[#fde68a]">
+                    云存档（{formatSavedAt(cloudConflict.cloudSavedAt)}）早于本地进度（
+                    {formatSavedAt(cloudConflict.localSavedAt)}），已阻止覆盖。
+                  </p>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCloudConflict(null);
+                        setCloudNotice('已保留本地进度');
+                      }}
+                      className="flex-1 min-h-[36px] rounded-lg text-[11px] font-bold bg-[#181d31] border border-[#384166] text-[#cbd5e1] hover:text-white cursor-pointer"
+                    >
+                      保留本地
+                    </button>
+                    <button
+                      type="button"
+                      disabled={cloudBusy}
+                      onClick={() => void handleRestoreCloud(true)}
+                      className="flex-1 min-h-[36px] rounded-lg text-[11px] font-bold bg-[#f43f5e]/20 border border-[#f43f5e]/55 text-[#fecdd3] hover:bg-[#f43f5e]/32 disabled:opacity-40 cursor-pointer"
+                    >
+                      仍然覆盖本地
+                    </button>
+                  </div>
+                </div>
+              )}
+              {cloudNotice && <p className="text-[11px] text-[#6ee7b7]">{cloudNotice}</p>}
+              <button
+                type="button"
+                onClick={() => void requestAddToDesktop()}
+                className="w-full min-h-[40px] inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-[#181d31] border border-[#384166] text-[#cbd5e1] hover:text-white hover:border-[#c084fc]/50 cursor-pointer"
+              >
+                <Smartphone className="w-3.5 h-3.5 text-[#c084fc]" />
+                <span>添加到桌面</span>
+              </button>
+            </div>
+
             {/* Domestic Compliance & Version Info */}
             <div className="rounded-xl bg-[#101322] border border-[#2e3552] px-3.5 py-2.5 flex items-center justify-between gap-2 flex-wrap text-xs">
               <div className="text-[#94a3b8]">
-                <span className="font-mono-num text-[#cbd5e1] font-semibold">v3.6.0</span>
+                <span className="font-mono-num text-[#cbd5e1] font-semibold">v3.11.0</span>
                 <span className="mx-1.5">·</span>
                 <span>适龄 12+</span>
                 <span className="mx-1.5">·</span>
-                <span>纯单机不收集隐私</span>
+                <span>TapTap 登录 / 云存档 / 激励广告</span>
               </div>
-              <button
-                type="button"
-                onClick={() => setShowCompliance(true)}
-                className="inline-flex items-center gap-1 text-[#7dd3fc] hover:text-[#cffafe] font-semibold cursor-pointer"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span>协议与忠告</span>
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() => setShowCompliance(true)}
+                  className="inline-flex items-center gap-1 text-[#7dd3fc] hover:text-[#cffafe] font-semibold cursor-pointer"
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  <span>协议与忠告</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const win = window.open('./privacy.html', '_blank', 'noopener,noreferrer');
+                    if (!win) window.location.href = './privacy.html';
+                  }}
+                  className="inline-flex items-center gap-1 text-[#94a3b8] hover:text-white font-semibold cursor-pointer"
+                >
+                  <span>隐私政策</span>
+                </button>
+              </div>
             </div>
           </div>
 
@@ -2051,10 +2253,14 @@ export function MercForgeModal({
     toggleAffixLock,
     rerollMercSingleSlot,
     rerollMercBatchSlots,
+    quenchMercAffix,
     confirmPendingLevelAffixes,
     rerollMercInnate,
     confirmPendingInnateAffix,
+    claimAdRerollToken,
+    canClaimAdRerollToken,
   } = useGameStore();
+  const [adRerollLoading, setAdRerollLoading] = useState(false);
 
   if (slotIndex === null) return null;
   const slot = mercs[slotIndex];
@@ -2106,12 +2312,17 @@ export function MercForgeModal({
   }
 
   let unlockedUnlockedCount = 0;
+  const unlockedIndices: number[] = [];
   for (let i = 0; i < slot.unlockedLevelSlots; i++) {
-    if (!slot.lockedLevelSlots[i]) unlockedUnlockedCount++;
+    if (!slot.lockedLevelSlots[i]) {
+      unlockedUnlockedCount++;
+      unlockedIndices.push(i);
+    }
   }
+  const batchRerollCost = getBatchRerollCost(unlockedIndices);
   const canBatchReroll =
     unlockedUnlockedCount > 0 &&
-    meta.affixStones >= unlockedUnlockedCount &&
+    meta.affixStones >= batchRerollCost &&
     slot.pendingLevelAffixes === null;
   const pityPct = Math.min(100, (meta.rerollPity / 10) * 100);
 
@@ -2303,7 +2514,7 @@ export function MercForgeModal({
           <div className="space-y-1.5">
             <div className="flex items-center justify-between text-[11px] text-[#94a3b8]">
               <span>10 重等级词缀槽（达对应等级激活并自身伤害 ×2）</span>
-              {s5 && <span className="text-[#fb7185]">古神嗣词缀 ×1.5</span>}
+              {s5 && <span className="text-[#fb7185]">古神嗣非复利词缀 ×1.5</span>}
             </div>
 
             {LEVEL_SLOT_THRESHOLDS.map((reqLv, sIdx) => {
@@ -2425,6 +2636,11 @@ export function MercForgeModal({
                             firstAffixRelicLv
                           )}
                         </p>
+                        {newCfg?.recommendedFor && (
+                          <span className="mt-0.5 inline-flex items-center rounded-md border border-[#38bdf8]/35 bg-[#0c4a6e]/30 px-1.5 py-0.5 text-[10px] font-semibold text-[#7dd3fc]">
+                            {newCfg.recommendedFor}
+                          </span>
+                        )}
                       </div>
                     </div>
                   );
@@ -2434,7 +2650,15 @@ export function MercForgeModal({
               const tMeta = inst ? AFFIX_TIER_META[inst.tier] : null;
               const cfg = inst ? AFFIXES[inst.id] : null;
               const canSingleRoll =
-                slot.pendingLevelAffixes === null && meta.affixStones >= 2;
+                slot.pendingLevelAffixes === null &&
+                (meta.affixStones >= getSingleRerollCost(sIdx) || meta.adFreeRerollTokens > 0);
+              const quenchCost = inst ? getQuenchCost(inst.tier) : null;
+              const nextTier = inst ? getNextAffixTier(inst.tier) : null;
+              const canQuench =
+                Boolean(inst) &&
+                quenchCost !== null &&
+                slot.pendingLevelAffixes === null &&
+                meta.affixStones >= quenchCost;
 
               return (
                 <div
@@ -2460,6 +2684,11 @@ export function MercForgeModal({
                       )}
                       {sIdx <= 3 && firstAffixRelicLv > 0 && (
                         <span className="text-[11px] text-[#fbbf24]">· 古神瞳</span>
+                      )}
+                      {cfg?.recommendedFor && (
+                        <span className="text-[10.5px] font-semibold text-[#7dd3fc]">
+                          · {cfg.recommendedFor}
+                        </span>
                       )}
                     </div>
                     <p className="text-xs text-[#cbd5e1] leading-snug whitespace-normal">
@@ -2501,6 +2730,26 @@ export function MercForgeModal({
 
                     <button
                       type="button"
+                      onClick={() => quenchMercAffix(slotIndex, sIdx)}
+                      disabled={!canQuench}
+                      title={
+                        quenchCost === null
+                          ? '仙品已是道纹极致，无法继续淬炼'
+                          : !inst
+                            ? '先洗练出一条道纹才能淬炼'
+                            : `淬炼：${tMeta?.label} → ${nextTier ? AFFIX_TIER_META[nextTier].label : ''}，固定消耗 ${quenchCost} 词缀石`
+                      }
+                      className={`min-h-[42px] px-2.5 py-1.5 rounded-lg border text-[11px] font-bold transition-colors cursor-pointer whitespace-nowrap ${
+                        canQuench
+                          ? 'bg-[#f59e0b]/18 border-[#fbbf24]/55 text-[#fef08a] hover:bg-[#f59e0b]/30'
+                          : 'bg-[#161929] border-[#2e3552] text-[#64748b] cursor-not-allowed'
+                      }`}
+                    >
+                      {quenchCost === null ? '淬满' : `淬炼 ${quenchCost}`}
+                    </button>
+
+                    <button
+                      type="button"
                       onClick={() => rerollMercSingleSlot(slotIndex, sIdx)}
                       disabled={!canSingleRoll}
                       className={`min-h-[42px] px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors cursor-pointer whitespace-nowrap ${
@@ -2509,7 +2758,9 @@ export function MercForgeModal({
                           : 'bg-[#161929] border-[#2e3552] text-[#64748b] cursor-not-allowed'
                       }`}
                     >
-                      单洗(2石)
+                      {meta.adFreeRerollTokens > 0
+                        ? '单洗(广告免费)'
+                        : `单洗(${getSingleRerollCost(sIdx)}石)`}
                     </button>
                   </div>
                 </div>
@@ -2630,6 +2881,29 @@ export function MercForgeModal({
             </div>
           ) : (
             <>
+              {adsAvailableForUi() && (
+              <div className="flex items-center justify-between gap-2 rounded-lg border border-[#22d3ee]/30 bg-[#0d1520] px-2.5 py-1.5">
+                <span className="text-[10.5px] text-[#cffafe]">
+                  广告免费洗练{' '}
+                  <b className="font-mono-num text-[#22d3ee]">{meta.adFreeRerollTokens}</b> 次
+                </span>
+                <AdRewardButton
+                  label="+1 次"
+                  loading={adRerollLoading}
+                  disabled={!canClaimAdRerollToken}
+                  onClick={() => {
+                    if (adRerollLoading || !canClaimAdRerollToken) return;
+                    setAdRerollLoading(true);
+                    void showRewardedAd('free_reroll').then((ok) => {
+                      setAdRerollLoading(false);
+                      if (ok) claimAdRerollToken();
+                    });
+                  }}
+                  tone="cyan"
+                />
+              </div>
+              )}
+
               <div className="flex items-center justify-between text-[10px]">
                 <span className="text-[#cbd5e1]">气运保底进度（满 10 次必出极品/仙品）</span>
                 <span className="font-mono-num text-[#fbbf24]">{meta.rerollPity} / 10</span>
@@ -2666,7 +2940,7 @@ export function MercForgeModal({
                       ? 'Lv.10 开启第1槽后洗练'
                       : unlockedUnlockedCount === 0
                         ? '已解锁槽位全锁'
-                        : `批量洗练未锁槽 (${unlockedUnlockedCount}石)`}
+                        : `批量洗练未锁槽 (${batchRerollCost}石)`}
                   </span>
                 </button>
               </div>

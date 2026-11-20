@@ -180,7 +180,7 @@ export interface RunState {
   mana: number;
   clickStacks: string;
   manualClicks: number;
-  swordAndHeroAttacksForCannon: number; // Every 15 reduces cannon CD by 1.0s
+  swordAndHeroAttacksForCannon: number; // Every 15 reduces cannon CD by 0.4s (shared charge cap 1.0s/s)
   enlightenmentLevel: number;
   accumulatedAtk: string;
   sharedHeroGrowth: string;
@@ -196,6 +196,8 @@ export interface RunState {
     hero: string;
     poison: string;
     mercs: [string, string, string, string, string];
+    /** 点击联动（伴生剑意/御剑随心/万道合击）与机神充能的额外攻击秒伤 */
+    bonus: string;
   };
 }
 
@@ -241,6 +243,16 @@ export interface MetaState {
   totalClicks: string;
   highestDps: string;
   totalRerolls: number;
+  // 广告与每日福利
+  lastDailyChestDay: string;
+  lastAdRerollDay: string;
+  adRerollsToday: number;
+  adFreeRerollTokens: number;
+  /** 广告灵石加速：结束时间戳、倍率、每日次数 */
+  adStoneBoostUntil: number;
+  adStoneBoostMult: number;
+  lastAdStoneBoostDay: string;
+  adStoneBoostsToday: number;
 }
 
 export interface SettingsState {
@@ -394,6 +406,13 @@ export interface AffixConfig {
   baseValue: number;
   unitKind: 'pct' | 'sec' | 'rate'; // pct -> +X%, sec -> X.XX秒, rate -> +X/秒
   description: string;
+  /**
+   * 复利型词缀的品质软上限：品质倍率开平方，且不吃 5 号位 1.5× 词缀放大。
+   * 避免凡→仙的 7× 单价在多个乘区里被指数级复利放大。
+   */
+  tierScaling?: 'sqrt';
+  /** 搭配/槽位提示，例如「推荐 5 号位」「前 5 重生效」 */
+  recommendedFor?: string;
 }
 
 export interface InnateAffixConfig {
@@ -447,8 +466,18 @@ export interface TribulationConfig {
   relicDropTier: RelicTier;
   relicDropWeights: Partial<Record<RelicTier, number>>;
   relicDropCount: number;
+  /** 每重躯壳的词缀石期望掉落（全通 = 10 × 此值）；支持小数，整数必掉、小数按概率补 1 颗 */
+  stonePerShell: number;
   unlockReqPrevClears: number;
   unlockReqRelicLevels: number;
   bonusRelicLevels: number;
   mythicDropChance: number;
+}
+
+/** 云存档恢复结果（带冲突原因，供设置页二次确认） */
+export interface CloudRestoreResult {
+  ok: boolean;
+  reason?: 'empty' | 'invalid' | 'older';
+  cloudSavedAt?: number;
+  localSavedAt?: number;
 }

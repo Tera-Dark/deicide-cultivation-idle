@@ -23,18 +23,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      # 仓库锁文件为 bun.lock，必须用 bun 安装，否则依赖解析与本地不一致
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
         with:
-          node-version: 22
+          bun-version: 1.4.4
 
       - name: Install dependencies
-        run: npm install --no-audit --no-fund
+        run: bun install --frozen-lockfile
 
       - name: Type check & build
         run: |
-          npm run lint
-          npm run build
+          bun run lint
+          bun run build
           touch dist/.nojekyll
 
       - name: Setup Pages

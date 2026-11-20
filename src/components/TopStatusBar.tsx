@@ -9,6 +9,13 @@ import {
   TimerSigilIcon,
 } from './CultivationIcons';
 
+const TRIB_ORDER_CN = ['', '一', '二', '三', '四', '五', '六', '七', '八', '九', '十'];
+
+function getCompactTribName(trib: { order: number; name: string }): string {
+  if (trib.order >= 10) return '终焉';
+  return `劫${TRIB_ORDER_CN[trib.order] ?? trib.order}`;
+}
+
 interface TopStatusBarProps {
   onOpenTribulations: () => void;
   onOpenCompendium: () => void;
@@ -24,6 +31,7 @@ export function TopStatusBar({
 }: TopStatusBarProps) {
   const { run, meta, settings } = useGameStore();
   const trib = getTribulationConfig(run.tribulationId);
+  const compactName = getCompactTribName(trib);
   const ngSuffix =
     run.tribulationId === 'tier_10' && meta.ngPlusCount > 0 ? `+${meta.ngPlusCount}` : '';
 
@@ -35,10 +43,15 @@ export function TopStatusBar({
           <button
             type="button"
             onClick={onOpenTribulations}
-            className="inline-flex items-center gap-1.5 min-h-[40px] px-2.5 py-1.5 rounded-lg bg-[#1e2338] border border-[#384166] hover:border-[#38bdf8]/70 text-[13px] font-bold text-[#f4f1ea] transition-colors cursor-pointer min-w-0 max-w-[168px] sm:max-w-[220px]"
-            title="切换诸天劫数与查看速通记录"
+            className="inline-flex items-center gap-1 min-h-[40px] px-2 sm:px-2.5 py-1.5 rounded-lg bg-[#1e2338] border border-[#384166] hover:border-[#38bdf8]/70 text-[13px] font-bold text-[#f4f1ea] transition-colors cursor-pointer min-w-0 max-w-[86px] sm:max-w-[220px]"
+            title={`当前${trib.name}，点击切换诸天劫数与查看速通记录`}
+            aria-label={`当前${trib.name}，点击切换诸天劫数`}
           >
-            <span className="truncate font-display tracking-wide">
+            <span className="sm:hidden truncate font-display tracking-wide">
+              {compactName}
+              {ngSuffix}
+            </span>
+            <span className="hidden sm:inline truncate font-display tracking-wide">
               {trib.name}
               {ngSuffix}
             </span>
@@ -92,7 +105,7 @@ export function TopStatusBar({
 
           <div className="flex items-center justify-center gap-1.5 min-w-0">
             <AffixStoneIcon className="w-4 h-4 shrink-0" />
-            <span className="text-[#8da2c6] text-[11px] font-medium shrink-0">词缀</span>
+            <span className="text-[#8da2c6] text-[11px] font-medium shrink-0">词缀石</span>
             <span className="font-mono-num text-[13.5px] font-extrabold text-[#fbbf24] text-glow-amber truncate">
               {meta.affixStones.toLocaleString()}
             </span>

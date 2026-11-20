@@ -383,3 +383,21 @@
 .custom-scroll::-webkit-scrollbar-thumb:hover {
   background: rgba(56, 189, 248, 0.45);
 }
+
+/* 旧版 Android WebView / 部分小游戏容器不支持 dvh 时的回退 */
+@supports not (height: 100dvh) {
+  .h-\[100dvh\] { height: 100vh; }
+  .min-h-\[100dvh\] { min-height: 100vh; }
+  .h-\[92dvh\] { height: 92vh; }
+  .h-\[89dvh\] { height: 89vh; }
+  .h-\[40dvh\] { height: 40vh; }
+  .max-h-\[90dvh\] { max-height: 90vh; }
+  .max-h-\[92dvh\] { max-height: 92vh; }
+}
+
+/* 小游戏 WebView 内的滚动与点击手感 */
+html,
+body {
+  overscroll-behavior: none;
+  -webkit-tap-highlight-color: transparent;
+}

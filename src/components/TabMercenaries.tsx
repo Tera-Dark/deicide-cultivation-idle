@@ -88,7 +88,7 @@ export function TabMercenaries({
   }
   if (mercs[2]?.unlocked && (mercs[2].innateAffix === 'sp_cannon_gat' || slotStats.some((s) => s.cdReduceCanSec > 0))) {
     detectedSynergies.push({
-      label: `无限核弹 (${pctOf(slotStats[2].dpsEstimate).toFixed(0)}%)`,
+      label: `无限核弹 (${pctOf(slotStats[2].dpsEstimate.add(teamBreakdown.cannonChargeDps)).toFixed(0)}%)`,
       color: 'text-[#fbbf24]',
     });
   }
@@ -165,7 +165,7 @@ export function TabMercenaries({
 
         {showBuildAnalysis && (
           <div className="mt-2.5 pt-2.5 border-t border-white/8 space-y-2.5 text-xs">
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 font-mono-num">
+            <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-8 gap-1.5 font-mono-num">
               {[
                 { name: '主角叩击', val: heroDps, color: 'text-[#67e8f9]' },
                 { name: '青冥剑侍', val: slotStats[0].dpsEstimate, color: 'text-[#38bdf8]' },
@@ -177,6 +177,12 @@ export function TabMercenaries({
                   color: 'text-[#c084fc]',
                 },
                 { name: '古神嗣', val: slotStats[4].dpsEstimate, color: 'text-[#fb7185]' },
+                { name: '点击联动', val: teamBreakdown.clickLinkDps, color: 'text-[#22d3ee]' },
+                {
+                  name: '机神充能',
+                  val: teamBreakdown.cannonChargeDps,
+                  color: 'text-[#fb923c]',
+                },
               ].map((row) => (
                 <div
                   key={row.name}
@@ -186,6 +192,12 @@ export function TabMercenaries({
                   <div className={`font-bold ${row.color}`}>{pctOf(row.val).toFixed(1)}%</div>
                 </div>
               ))}
+            </div>
+
+            <div className="font-mono-num text-[11px] text-[#94a3b8]">
+              点击 {teamBreakdown.clicksPerSec.toFixed(1)}/s · 攻击事件{' '}
+              {teamBreakdown.attacksPerSec.toFixed(0)}/s · 命中事件{' '}
+              {teamBreakdown.hitsPerSec.toFixed(0)}/s（25/s 仅封顶间隔驱动攻击）
             </div>
 
             {detectedSynergies.length > 0 && (
@@ -259,7 +271,7 @@ export function TabMercenaries({
               ) : (
                 <span className="min-h-[48px] min-w-[108px] inline-flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-xs text-[#94a3b8] bg-[#101322] border border-[#2e3552] shrink-0 whitespace-nowrap">
                   <Lock className="w-3.5 h-3.5" />
-                  <span>破2重开</span>
+                  <span>破第2重解锁</span>
                 </span>
               )}
             </div>

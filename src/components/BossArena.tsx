@@ -11,6 +11,7 @@ import {
   getPoisonTickExpectedDamage,
   getRelicTotalLv,
   getSkillEffectiveValues,
+  getTeamCombatDpsBreakdown,
 } from '../core/damageCalc';
 import { formatNumber, formatTimeMs, toDecimal } from '../core/formatNumber';
 import { useGameStore } from '../stores/useGameStore';
@@ -121,6 +122,18 @@ function BossSacredGeometry({
     .join(' ');
 
   const scaleClass = isPhase7to9 ? 'scale-110' : 'scale-100';
+  const eyeColor = isPhase10
+    ? '#f43f5e'
+    : isPhase7to9
+      ? '#fbbf24'
+      : isPhase4to6
+        ? '#f43f5e'
+        : '#38bdf8';
+  const eyeRx = isPhase10 ? 34 : isPhase7to9 ? 30 : isPhase4to6 ? 26 : 21;
+  const eyeRy = isPhase10 ? 22 : isPhase7to9 ? 19 : isPhase4to6 ? 17 : 14;
+  const pupilRx = isHitSquashed ? 4 : isPhase10 ? 7 : 6;
+  const pupilRy = isHitSquashed ? 9 : isPhase10 ? 17 : 15;
+  const showTentacles = phaseIndex >= 1;
   const sizeClass = expandedMobile
     ? 'w-40 h-40 sm:w-48 sm:h-48 lg:w-44 lg:h-44'
     : 'w-24 h-24 sm:w-28 sm:h-28 lg:w-40 lg:h-40';
@@ -131,6 +144,17 @@ function BossSacredGeometry({
       className={`${sizeClass} overflow-visible transition-transform duration-300 ${scaleClass}`}
       style={{ filter: glowColor }}
     >
+      <defs>
+        <radialGradient id="boss-iris" cx="50%" cy="50%" r="55%">
+          <stop offset="0%" stopColor={eyeColor} stopOpacity="0.95" />
+          <stop offset="55%" stopColor={eyeColor} stopOpacity="0.55" />
+          <stop offset="100%" stopColor="#070810" stopOpacity="0.98" />
+        </radialGradient>
+        <radialGradient id="boss-eye-glow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor={eyeColor} stopOpacity="0.4" />
+          <stop offset="100%" stopColor={eyeColor} stopOpacity="0" />
+        </radialGradient>
+      </defs>
       <circle
         cx="100"
         cy="100"
@@ -141,6 +165,29 @@ function BossSacredGeometry({
         strokeWidth="1"
         strokeDasharray="3 6"
       />
+      <circle cx="100" cy="100" r="72" fill="url(#boss-eye-glow)" />
+
+      {showTentacles && (
+        <g
+          className="animate-eldritch-breathe"
+          style={{ transformOrigin: '100px 100px' }}
+          opacity={isPhase4to6 ? 0.72 : 0.5}
+          fill="none"
+          stroke={eyeColor}
+          strokeLinecap="round"
+        >
+          <path d="M100 126 C 90 150, 64 154, 54 182" strokeWidth="3" />
+          <path d="M100 126 C 110 150, 136 154, 146 182" strokeWidth="3" />
+          <path d="M84 118 C 58 130, 44 120, 26 140" strokeWidth="2.4" />
+          <path d="M116 118 C 142 130, 156 120, 174 140" strokeWidth="2.4" />
+          {phaseIndex >= 4 && (
+            <>
+              <path d="M78 132 C 56 154, 40 160, 30 188" strokeWidth="2" opacity="0.7" />
+              <path d="M122 132 C 144 154, 160 160, 170 188" strokeWidth="2" opacity="0.7" />
+            </>
+          )}
+        </g>
+      )}
 
       {isPhase1to3 && (
         <g
@@ -285,15 +332,36 @@ function BossSacredGeometry({
         </>
       )}
 
-      {(isPhase1to3 || isPhase4to6) && (
-        <polygon
-          points="100,82 118,100 100,118 82,100"
-          fill={isPhase4to6 ? '#f43f5e' : '#38bdf8'}
-          fillOpacity="0.9"
-          stroke="#ffffff"
-          strokeOpacity="0.7"
-          strokeWidth="1.2"
-        />
+      {(isPhase1to3 || isPhase4to6 || isPhase7to9 || isPhase10) && (
+        <g className="animate-eldritch-breathe" style={{ transformOrigin: '100px 100px' }}>
+          <ellipse
+            cx="100"
+            cy="100"
+            rx={eyeRx + 5}
+            ry={eyeRy + 5}
+            fill="#08060d"
+            stroke={eyeColor}
+            strokeWidth="1.8"
+            strokeOpacity="0.85"
+          />
+          <ellipse
+            cx="100"
+            cy="100"
+            rx={eyeRx}
+            ry={eyeRy}
+            fill="url(#boss-iris)"
+            stroke={eyeColor}
+            strokeWidth="1.2"
+          />
+          <ellipse
+            cx="100"
+            cy="100"
+            rx={pupilRx}
+            ry={pupilRy}
+            fill="#05060a"
+          />
+          <circle cx="96" cy="94" r="2.4" fill="#ffffff" opacity="0.8" />
+        </g>
       )}
     </svg>
   );
@@ -346,7 +414,11 @@ export function BossArena({
   const heroDps = toDecimal(run.recentTickDps.hero);
   const poisonDps = toDecimal(run.recentTickDps.poison);
   const mercDpsSum = run.recentTickDps.mercs.reduce((acc, v) => acc.add(toDecimal(v)), new Decimal(0));
-  const totalDps = heroDps.add(poisonDps).add(mercDpsSum);
+  const totalDps = heroDps
+    .add(poisonDps)
+    .add(mercDpsSum)
+    .add(toDecimal(run.recentTickDps.bonus ?? '0'));
+  const liveBreakdown = getTeamCombatDpsBreakdown(run, mercs, meta);
 
   const poisonInfo = getPoisonTickExpectedDamage(
     mercs,
@@ -399,6 +471,9 @@ export function BossArena({
               </span>
               <span className="font-mono-num font-bold text-[#7dd3fc] shrink-0">
                 DPS {formatNumber(totalDps, settings.numberMode, true)}/s
+                <span className="text-[#94a3b8] font-semibold ml-1">
+                  · 命{liveBreakdown.hitsPerSec.toFixed(0)}/s
+                </span>
               </span>
             </div>
             <div className="relative h-2.5 w-full rounded bg-[#090b12] border border-[#384166] overflow-hidden">
@@ -462,6 +537,9 @@ export function BossArena({
           <div className="flex items-center gap-2 shrink-0">
             <span className="font-mono-num text-xs font-bold text-[#7dd3fc]">
               DPS {formatNumber(totalDps, settings.numberMode, true)}/s
+              <span className="text-[#94a3b8] font-semibold ml-1">
+                · 命{liveBreakdown.hitsPerSec.toFixed(0)}/s
+              </span>
               {run.poisonStacks > 0 && (
                 <span className="text-[#34d399] font-semibold ml-1">
                   · 毒{run.poisonStacks}({formatNumber(poisonInfo.expectedPoison, settings.numberMode)})

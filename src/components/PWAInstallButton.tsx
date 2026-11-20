@@ -1,10 +1,14 @@
 import { useState } from 'react';
 import { CheckCircle2, Download, Share, Smartphone } from 'lucide-react';
 import { usePWAInstall } from '../hooks/usePWAInstall';
+import { isTapMiniGame } from '../platform/tap';
 
 export function PWAInstallButton() {
   const { isInstallable, isInstalled, isIOS, install } = usePWAInstall();
   const [showIOSGuide, setShowIOSGuide] = useState(false);
+
+  // 小游戏内使用 TapTap 原生「添加到桌面」，不再展示浏览器 PWA 安装引导。
+  if (isTapMiniGame()) return null;
 
   if (isInstalled) {
     return (

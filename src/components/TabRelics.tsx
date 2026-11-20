@@ -96,7 +96,7 @@ export function TabRelics() {
           {!meta.unlockedRelicHall ? (
             <span className="min-h-[44px] inline-flex items-center gap-1.5 px-3 py-2 rounded-xl text-xs text-[#94a3b8] bg-[#101322] border border-[#2e3552] shrink-0 whitespace-nowrap">
               <Lock className="w-3.5 h-3.5" />
-              <span>首通劫一开</span>
+              <span>首通劫一解锁</span>
             </span>
           ) : (
             <div className="min-h-[44px] px-3 py-1.5 rounded-xl text-right bg-[#101322] border border-[#c084fc]/35 shrink-0 flex flex-col justify-center">

@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import Decimal from 'break_infinity.js';
-import { ArrowUpCircle, Bot, ChevronDown, ChevronUp, Lock, Sparkles, Zap } from 'lucide-react';
+import { ArrowUpCircle, Bot, ChevronDown, ChevronUp, Gift, Lock, Sparkles, Zap } from 'lucide-react';
+import { AdRewardButton } from './AdRewardButton';
+import { adsAvailableForUi, showRewardedAd } from '../platform/tap';
 import {
   ENLIGHTENMENT_BASE_COST,
   ENLIGHTENMENT_COST_GROWTH,
@@ -31,7 +33,17 @@ export function TabHero() {
     buyPuppet,
     upgradeSkill,
     toggleAutoSetting,
+    claimDailyChest,
+    canClaimDailyChest,
+    claimAdStoneBoost,
+    canClaimAdStoneBoost,
+    adStoneBoostActive,
+    adStoneBoostRemainingMs,
+    adStoneBoostsLeftToday,
   } = useGameStore();
+  const [chestLoading, setChestLoading] = useState(false);
+  const [boostLoading, setBoostLoading] = useState(false);
+  const adReady = adsAvailableForUi();
 
   const stones = toDecimal(run.spiritStones);
   const clicks = toDecimal(run.clickStacks);
@@ -69,6 +81,22 @@ export function TabHero() {
   const autoCfg = meta.autoSettings;
   const [autoOpen, setAutoOpen] = useState(false);
 
+  const handleChestAd = async () => {
+    if (!canClaimDailyChest || chestLoading) return;
+    setChestLoading(true);
+    const ok = await showRewardedAd('daily_chest');
+    setChestLoading(false);
+    if (ok) claimDailyChest();
+  };
+
+  const handleStoneBoostAd = async () => {
+    if (!canClaimAdStoneBoost || boostLoading) return;
+    setBoostLoading(true);
+    const ok = await showRewardedAd('stone_boost');
+    setBoostLoading(false);
+    if (ok) claimAdStoneBoost();
+  };
+
   const autoItems = [
     {
       key: 'autoRealm' as const,
@@ -100,6 +128,56 @@ export function TabHero() {
 
   return (
     <div className="space-y-2.5">
+      {adReady && (
+        <div className="rounded-xl border border-[#fbbf24]/40 bg-gradient-to-r from-[#1b1520] via-[#151827] to-[#121626] p-3 flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-xs font-bold text-[#fef08a]">
+            <Gift className="w-4 h-4 shrink-0" />
+            <span>每日天命宝箱</span>
+          </div>
+          <p className="mt-1 text-[11px] leading-relaxed text-[#94a3b8]">
+            神晶 ×3 · 词缀石 ×5 · 每日一次
+          </p>
+        </div>
+        <AdRewardButton
+          label={canClaimDailyChest ? '领取' : '已领取'}
+          hint={canClaimDailyChest ? '每日1次' : '明日再来'}
+          loading={chestLoading}
+          disabled={!canClaimDailyChest}
+          onClick={() => void handleChestAd()}
+          tone="amber"
+        />
+        </div>
+      )}
+
+      {adReady && (
+        <div className="rounded-xl border border-[#22d3ee]/35 bg-gradient-to-r from-[#0f1a20] via-[#121626] to-[#121626] p-3 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex items-center gap-1.5 text-xs font-bold text-[#a5f3fc]">
+              <Zap className="w-4 h-4 shrink-0" />
+              <span>灵石加速</span>
+            </div>
+            <p className="mt-1 text-[11px] leading-relaxed text-[#94a3b8]">
+              10 分钟内在线伤害转化灵石 ×2 · 今日剩余 {adStoneBoostsLeftToday} 次
+            </p>
+          </div>
+          <AdRewardButton
+            label={adStoneBoostActive ? '加速中' : '启动'}
+            hint={
+              adStoneBoostActive
+                ? `${Math.max(1, Math.ceil(adStoneBoostRemainingMs / 60000))}分钟`
+                : canClaimAdStoneBoost
+                  ? '10分钟'
+                  : '今日已满'
+            }
+            loading={boostLoading}
+            disabled={!canClaimAdStoneBoost}
+            onClick={() => void handleStoneBoostAd()}
+            tone="cyan"
+          />
+        </div>
+      )}
+
       {/* Collapsible Late-Game Automation Control Panel */}
       <div className="bg-[#121626] border border-[#2e3552] rounded-xl overflow-hidden">
         <button
@@ -114,7 +192,7 @@ export function TabHero() {
             <span className="font-mono-num text-[11px] text-[#94a3b8] truncate">
               {unlockedAutoCount > 0
                 ? `已开启 ${activeAutoCount}/${unlockedAutoCount}`
-                : '劫三开破境/傀儡 · 劫五开顿悟/强技'}
+                : '劫三 / 劫五解锁灵枢自动化'}
             </span>
           </div>
           <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-[#94a3b8] shrink-0">
@@ -268,7 +346,7 @@ export function TabHero() {
         {!showPuppet ? (
           <div className="min-h-[48px] min-w-[108px] px-3 py-2 rounded-lg text-xs text-[#94a3b8] bg-[#101322] border border-[#2e3552] inline-flex items-center justify-center gap-1.5 shrink-0 whitespace-nowrap">
             <Lock className="w-3.5 h-3.5" />
-            <span>破1重开</span>
+            <span>破第1重解锁</span>
           </div>
         ) : (
           <button
